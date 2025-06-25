@@ -1,0 +1,8 @@
+prefix=/home/l/DRL-robot-navigation-main-LZH/DRL-robot-navigation-main/catkin_ws/install
+
+Name: imomd_rrt_star
+Description: Description of imomd_rrt_star
+Version: 0.0.0
+Cflags: -I${prefix}/include
+Libs: -L${prefix}/lib -limomd_rrt_star
+Requires: roscpp std_msgs visualization_msgs

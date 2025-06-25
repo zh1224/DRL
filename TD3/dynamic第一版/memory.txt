@@ -1,0 +1,6 @@
+ynamic:
+用的average.py 平滑率是0.996和0.7
+TD3.csv是45两个平均
+apf是37
+DDPG用33
+SAC是5  还不确定，应该是

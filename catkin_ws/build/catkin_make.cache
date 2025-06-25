@@ -1,0 +1,2 @@
+IMOMD-RRTStar-ros_wrapper_isrr_release:multi_robot_scenario:velodyne_simulator/velodyne_description:velodyne_simulator/velodyne_gazebo_plugins:velodyne_simulator/velodyne_simulator:zzx_run_description
+-DCATKIN_DEVEL_PREFIX=/home/l/DRL-robot-navigation-main-LZH/DRL-robot-navigation-main/catkin_ws/devel -DCMAKE_INSTALL_PREFIX=/home/l/DRL-robot-navigation-main-LZH/DRL-robot-navigation-main/catkin_ws/install -G Unix Makefiles

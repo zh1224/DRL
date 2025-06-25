@@ -1,0 +1,38 @@
+<launch>
+  <!-- <include
+    file="$(find gazebo_ros)/launch/empty_world.launch" /> -->
+  <!-- <node
+    name="tf_footprint_base"
+    pkg="tf"
+    type="static_transform_publisher"
+    args="0 0 0 0 0 0 base_link base_footprint 40" /> -->
+
+  <!-- 定义 gpu 参数，默认为 false -->
+  <arg name="gpu" default="false" />
+  <!-- 解析 xacro 文件并将 robot_description 上传到参数服务器 -->
+  <param name="robot_description" 
+         command="$(find xacro)/xacro --inorder $(find zzx_run_description)/urdf/zzx_run_robot.urdf gpu:=$(arg gpu)" />
+  <!-- 在 Gazebo 中加载模型 -->
+  <node name="spawn_model" 
+        pkg="gazebo_ros" 
+        type="spawn_model" 
+        args="-urdf -param robot_description -model zzx_run_robot" 
+        output="screen" />
+
+<!-- 启动 robot_state_publisher 节点，该节点会发布机器人的 TF 信息以及关节状态 -->
+<node pkg="robot_state_publisher" type="robot_state_publisher" name="robot_state_publisher">
+  <!-- 设置发布频率，单位为 Hz。此处设置为每秒发布 30 次 -->
+  <param name="publish_frequency" type="double" value="30.0" />
+</node>
+
+	<node name="joint_state_publisher" pkg="joint_state_publisher" type="joint_state_publisher" >
+  <param name="publish_frequency" type="double" value="30.0" />
+</node>
+
+
+  <!-- <node
+    name="fake_joint_calibration"
+    pkg="rostopic"
+    type="rostopic"
+    args="pub /calibrated std_msgs/Bool true" /> -->
+</launch>

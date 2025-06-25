@@ -1,0 +1,8 @@
+prefix=/home/l/DRL-robot-navigation-main-LZH/DRL-robot-navigation-main/catkin_ws/install
+
+Name: zzx_run_description
+Description: Description of zzx_run_description
+Version: 0.0.0
+Cflags: 
+Libs: -L${prefix}/lib 
+Requires: 

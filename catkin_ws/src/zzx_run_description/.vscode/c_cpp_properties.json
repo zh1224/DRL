@@ -1,0 +1,59 @@
+{
+  "configurations": [
+    {
+      "browse": {
+        "databaseFilename": "${default}",
+        "limitSymbolsToIncludedHeaders": false
+      },
+      "includePath": [
+        "/home/ubuntu/catkin_ws_241230/devel/include/**",
+        "/home/ubuntu/catkin_ws/devel/include/**",
+        "/opt/ros/melodic/include/**",
+        "/home/ubuntu/catkin_ws_241230/src/ZZX_RUN/navigation/amcl/include/**",
+        "/home/ubuntu/catkin_ws/src/apm_test/include/**",
+        "/home/ubuntu/catkin_ws_241230/src/ZZX_RUN/navigation/base_local_planner/include/**",
+        "/home/ubuntu/catkin_ws/src/ego_planner/bspline_opt/include/**",
+        "/home/ubuntu/catkin_ws/src/VINS-Fusion/camera_models/include/**",
+        "/home/ubuntu/catkin_ws_241230/src/ZZX_RUN/navigation/carrot_planner/include/**",
+        "/home/ubuntu/catkin_ws_241230/src/ZZX_RUN/navigation/clear_costmap_recovery/include/**",
+        "/home/ubuntu/catkin_ws_241230/src/ZZX_RUN/navigation/costmap_2d/include/**",
+        "/home/ubuntu/catkin_ws/src/ego_planner/drone_detect/include/**",
+        "/home/ubuntu/catkin_ws_241230/src/ZZX_RUN/navigation/dwa_local_planner/include/**",
+        "/home/ubuntu/catkin_ws/src/ego_planner/plan_manage/include/**",
+        "/home/ubuntu/catkin_ws/src/gazebo_ros_pkgs/gazebo_plugins/include/**",
+        "/home/ubuntu/catkin_ws/src/gazebo_ros_pkgs/gazebo_ros/include/**",
+        "/home/ubuntu/catkin_ws/src/gazebo_ros_pkgs/gazebo_ros_control/include/**",
+        "/home/ubuntu/catkin_ws_241230/src/ZZX_RUN/navigation/global_planner/include/**",
+        "/home/ubuntu/catkin_ws_241230/src/ZZX_RUN/hector_slam/hector_geotiff/include/**",
+        "/home/ubuntu/catkin_ws_241230/src/ZZX_RUN/hector_slam/hector_map_tools/include/**",
+        "/home/ubuntu/catkin_ws_241230/src/ZZX_RUN/hector_slam/hector_mapping/include/**",
+        "/home/ubuntu/catkin_ws_241230/src/ZZX_RUN/hector_slam/hector_marker_drawing/include/**",
+        "/home/ubuntu/catkin_ws_241230/src/ZZX_RUN/navigation/map_server/include/**",
+        "/home/ubuntu/catkin_ws_241230/src/ZZX_RUN/navigation/move_base/include/**",
+        "/home/ubuntu/catkin_ws/src/move_base_test/include/**",
+        "/home/ubuntu/catkin_ws_241230/src/ZZX_RUN/navigation/move_slow_and_clear/include/**",
+        "/home/ubuntu/catkin_ws/src/ego_planner/Utils/multi_map_server/include/**",
+        "/home/ubuntu/catkin_ws_241230/src/ZZX_RUN/navigation/nav_core/include/**",
+        "/home/ubuntu/catkin_ws_241230/src/ZZX_RUN/navigation/navfn/include/**",
+        "/home/ubuntu/catkin_ws_241230/src/ZZX_RUN/openslam_gmapping/include/**",
+        "/home/ubuntu/catkin_ws/src/ego_planner/path_searching/include/**",
+        "/home/ubuntu/catkin_ws/src/ego_planner/plan_env/include/**",
+        "/home/ubuntu/catkin_ws/src/ego_planner/Utils/pose_utils/include/**",
+        "/home/ubuntu/catkin_ws/src/ego_planner/Utils/quadrotor_msgs/include/**",
+        "/home/ubuntu/catkin_ws_241230/src/ZZX_RUN/navigation/rotate_recovery/include/**",
+        "/home/ubuntu/catkin_ws/src/tf_test/include/**",
+        "/home/ubuntu/catkin_ws/src/ego_planner/traj_utils/include/**",
+        "/home/ubuntu/catkin_ws/src/ego_planner/Utils/uav_utils/include/**",
+        "/home/ubuntu/catkin_ws_241230/src/velodyne_simulator/velodyne_gazebo_plugins/include/**",
+        "/home/ubuntu/catkin_ws_241230/src/ZZX_RUN/navigation/voxel_grid/include/**",
+        "/usr/include/**"
+      ],
+      "name": "ROS",
+      "intelliSenseMode": "gcc-x64",
+      "compilerPath": "/usr/bin/gcc",
+      "cStandard": "gnu11",
+      "cppStandard": "c++14"
+    }
+  ],
+  "version": 4
+}
