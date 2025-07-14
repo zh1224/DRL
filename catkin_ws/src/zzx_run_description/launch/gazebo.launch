@@ -8,6 +8,9 @@
     args="0 0 0 0 0 0 base_link base_footprint 40" /> -->
 
   <!-- 定义 gpu 参数，默认为 false -->
+  <arg name="robot_name" default="lzh" />
+  <arg name="robot_position" default="-x 0 -y -4.2 -z 0" />
+  <param name="robot_orientation" value="-w 3 -x 3 -y 3 -z 3" />
   <arg name="gpu" default="false" />
   <!-- 解析 xacro 文件并将 robot_description 上传到参数服务器 -->
   <param name="robot_description" 
@@ -16,7 +19,7 @@
   <node name="spawn_model" 
         pkg="gazebo_ros" 
         type="spawn_model" 
-        args="-urdf -param robot_description -model zzx_run_robot" 
+        args="-urdf -param robot_description -model lzh_run_robot" 
         output="screen" />
 
 <!-- 启动 robot_state_publisher 节点，该节点会发布机器人的 TF 信息以及关节状态 -->

@@ -7,10 +7,10 @@
 # =============================== 固定参数区 ================================ #
 param1=0.05
 param2=40
-param3=7000
-param4=121             # 循环尾部自增 1
+param3=100
+param4=1218            # 循环尾部自增 1
 param5=740
-timeout_duration=20000 # 20 000 s ≈ 5.6 h
+timeout_duration=160000 # 20 000 s ≈ 5.6 h
 param6=0
 param7=0
 param8=600             # 500
@@ -20,7 +20,7 @@ start_exp=-3           # 初始指数 (10⁻⁵)
 num_executions=50      # 迭代次数，可按需调整
 # ========================================================================== #
 
-for (( i=5; i<num_executions; i++ ))
+for (( i=2; i<num_executions; i++ ))
 do
     # -------------------------- 计算 param10 ------------------------------ #
     mantissa=$(( (i % 9) + 1 ))        # 1~9 循环
@@ -32,11 +32,11 @@ do
          "$param1 $param2 $param3 $param4 $param5 $param6 $param7 $param8 $param9 $param10"
 
     timeout "$timeout_duration" \
-            python3 train_velodyne_td3_graph.py \
+            python3 train_velodyne_td3_graph_gpu.py \
             $param1 $param2 $param3 $param4 $param5 $param6 $param7 $param8 $param9 $param10
 
     # -------------------------- 循环内自增参数 ---------------------------- #
-   # param4=$((param4 + 1))             # 下次循环更新 param4
+#    param4=$((param4 + 1))             # 下次循环更新 param4
     # --------------------------------------------------------------------- #
 
     # -------------------------- 关机脚本调用 ------------------------------ #

@@ -1,0 +1,4 @@
+TD3_velodyne1211.0_actor是在static_pre.world里面训练出来的
+TD3_velodyne1212.0_actor是在上一个模型的基础上在动态dynamic_world里面训练出来的
+TD3_velodyne1213.0_actor是在上一个基础上面在static_last也就是很密集的静态world里面训练出来的
+以上是apf-td3模型

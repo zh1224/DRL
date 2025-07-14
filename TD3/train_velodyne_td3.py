@@ -16,7 +16,29 @@ from collections import deque
 import torch.multiprocessing as mp #A
 from replay_buffer import ReplayBuffer
 from velodyne_env import GazeboEnv
+from torch_geometric.nn import GATv2Conv, global_mean_pool
+from torch_geometric.data import Data
+from torch_geometric.data import Data, Batch
+# —— 完全图 edge_index：21×21，只生成一次 —— 
+# =============================================================
 
+# ────────────────── 全局常量 ──────────────────
+torch.set_printoptions(sci_mode=False, precision=4)
+N_NODES = 21                                         # 20 LiDAR + 1 Robot
+robot_idx = torch.full((20,), 20)
+lidar_idx = torch.arange(20)
+
+row = torch.cat([robot_idx, lidar_idx])
+col = torch.cat([lidar_idx, robot_idx])
+
+EDGE_INDEX_CONST = torch.stack([row, col], dim=0)  # (2, 40)
+
+
+# 20 条分界：-90° … +90°
+bound = torch.linspace(-np.pi/2, np.pi/2, 21)[:-1]      # (20,)
+# 右移半扇区 π/20 (=9°) 得中心角
+angles = bound + np.pi/20
+ANGLE_FEAT_CONST = torch.stack([torch.sin(angles), torch.cos(angles)], 1)  # (20,2)
 
 def evaluate(network, env,epoch, eval_episodes,success_queue,win):
     avg_reward = 0.0
@@ -53,57 +75,228 @@ def evaluate(network, env,epoch, eval_episodes,success_queue,win):
     return avg_reward
 
 
+# ── Actor with nested Encoder ──────────────────
 class Actor(nn.Module):
-    def __init__(self, state_dim, action_dim):
-        super(Actor, self).__init__()
+    # ---------- 嵌套的 GAT 编码器 ----------
+    class _Encoder(nn.Module):
+        def __init__(self, embed_dim=128, heads=2):
+            super().__init__()
+            self.g1 = GATv2Conv(7, embed_dim, heads=heads, concat=True, dropout=0.1)
+            
+           # self.g2 = GATv2Conv(32*heads, embed_dim, heads=1, concat=False)
 
-        self.layer_1 = nn.Linear(state_dim, 800)
-        self.layer_2 = nn.Linear(800, 600)
-       #= self.lstm = nn.LSTM(input_size=600, hidden_size=64, num_layers=1, batch_first=True)
-        self.layer_3 = nn.Linear(600, action_dim)
+        def forward(self, data: Data, flatten=False):
+            
+            x = F.elu(self.g1(data.x, data.edge_index))
+        #    x = self.g2(x, data.edge_index)              # (N_total, embed_dim)
+
+            if flatten:
+                B = int(data.batch.max()) + 1            # 图数
+           #     print("B:",x.view(B, -1))
+                return x.view(B, -1)                     # (B, 21*embed_dim)
+            else:
+                return global_mean_pool(x, data.batch)   # (B, embed_dim)
+
+    # ---------- Actor 本体 ----------
+    def __init__(self, embed_dim=64, act_dim=2,
+                 max_range=10.0, device="cpu"):
+        super().__init__()
+        self.device     = torch.device(device)
+        self.max_range  = max_range
+
+        # 1) 注册常量
+        self.register_buffer("edge_index", EDGE_INDEX_CONST,  persistent=False)
+        self.register_buffer("angle_feat", ANGLE_FEAT_CONST,  persistent=False)
+
+        # 2) 嵌入式 GAT 编码器
+        self.encoder = Actor._Encoder(embed_dim)
+        f_in=24
+        print("embed_dim:",embed_dim)
+        # 3) MLP Head
+               # 21 * embed_dim
+        self.fc1  = nn.Linear(f_in, 800)
+        self.fc2  = nn.Linear(800, 600)
+        self.fc3  = nn.Linear(600, act_dim)
         self.tanh = nn.Tanh()
 
-    def forward(self, s):
-        s = F.relu(self.layer_1(s))
-        s = F.relu(self.layer_2(s))
-        # s = s.unsqueeze(1)  # 增加一个维度，使形状为 (batch_size, seq_len=1, input_size=600)
-        # s, _ = self.lstm(s)  # LSTM 输出 (output, (h_n, c_n))
-        # s = s.squeeze(1)     # 去除 seq_len 维度，形状变为 (batch_size, hidden_size=64)
-        a = self.tanh(self.layer_3(s))
-        return a
+    # -------- （单/批量）构图函数，同前 --------
+    @torch.no_grad()
+    def _build_single(self, state24):
+        # (24,) → Data
+        laser = state24[:20].unsqueeze(1) 
+        
+      #  print("laser:",laser)
+        angle  = self.angle_feat
+        zeros3 = torch.zeros(20, 4, device=self.device)
+        sector = torch.cat([laser, angle, zeros3], dim=1)
+
+        robot  = state24[20:].unsqueeze(0)
+        zeros1 = torch.zeros(1, 3, device=self.device)
+        robot  = torch.cat([zeros1, robot], dim=1)
+
+        x = torch.cat([sector, robot], dim=0)
+       # print("Data:",x)
+        batch_vec = torch.zeros(21, dtype=torch.long, device=self.device)
+        return Data(x=x, edge_index=self.edge_index, batch=batch_vec)
+
+    @torch.no_grad()
+    def _build_batch(self, flat):
+        B = flat.size(0)
+        laser  = (flat[:, :20] ).unsqueeze(-1)
+        angle  = self.angle_feat.unsqueeze(0).expand(B, -1, -1)
+        zeros3 = torch.zeros(B, 20, 4, device=self.device)
+        sector = torch.cat([laser, angle, zeros3], dim=-1)
+
+        robot  = flat[:, 20:].unsqueeze(1)
+        zeros1 = torch.zeros(B, 1, 3, device=self.device)
+        robot  = torch.cat([zeros1, robot], dim=-1)
+
+        x = torch.cat([sector, robot], dim=1).reshape(B*21, 7)
+        ei  = self.edge_index.unsqueeze(0).repeat(B,1,1)
+        offset = (torch.arange(B, device=self.device)*21).view(B,1,1)
+        eiB = (ei + offset).reshape(2, -1)
+        batch_vec = torch.repeat_interleave(torch.arange(B, device=self.device), 21)
+        return Data(x=x, edge_index=eiB, batch=batch_vec)
+
+    @torch.no_grad()
+    def _build_graph(self, state24):
+        if isinstance(state24, np.ndarray):
+            state24 = torch.from_numpy(state24).float()
+        state24 = state24.to(self.device)
+        if state24.dim() == 1:
+            return self._build_single(state24)
+        else:
+            return self._build_batch(state24)
+
+    # -------- 前向 --------
+    def forward(self, state24):
+        graph = self._build_graph(state24)
+        # print("state:",state24[:20])
+        # print("laser:",graph.x)
+        #print("Data:",graph)
+     #   print("angel_feat:",ANGLE_FEAT_CONST)
+      #  nfv   = self.encoder(graph)                 # (B, 21*embed_dim)
+        h = F.relu(self.fc1(state24))
+        h = F.relu(self.fc2(h))
+        return self.tanh(self.fc3(h))               # (B, act_dim)
+
+
 
 
 class Critic(nn.Module):
-    def __init__(self, state_dim, action_dim):
-        super(Critic, self).__init__()
+    class _Encoder(nn.Module):
+        def __init__(self, embed_dim=32, heads=8):
+            super().__init__()
+            self.g1 = GATv2Conv(7, 32, heads=heads, concat=True)
+            self.g2 = GATv2Conv(32*heads, embed_dim, heads=1, concat=False)
 
-        self.layer_1 = nn.Linear(state_dim, 800)
-        self.layer_2_s = nn.Linear(800, 600)
-        self.layer_2_a = nn.Linear(action_dim, 600)
-        self.layer_3 = nn.Linear(600, 1)
+        def forward(self, data: Data, flatten=True):
+            x = F.elu(self.g1(data.x, data.edge_index))
+            x = self.g2(x, data.edge_index)              # (N_total, embed_dim)
 
-        self.layer_4 = nn.Linear(state_dim, 800)
-        self.layer_5_s = nn.Linear(800, 600)
-        self.layer_5_a = nn.Linear(action_dim, 600)
-        self.layer_6 = nn.Linear(600, 1)
+            if flatten:
+                B = int(data.batch.max()) + 1            # 图数
+                return x.view(B, -1)                     # (B, 21*embed_dim)
+            else:
+                return global_mean_pool(x, data.batch)   # (B, embed_dim)
 
-    def forward(self, s, a):
-      #  s = s.view(1, -1)
-        
-         # ----- Q1 -----
-        h_s1 = F.relu(self.layer_1(s))     # ① state → Linear → ReLU
-        h_s1 = self.layer_2_s(h_s1)        # ② 再 Linear（无激活）
-        h_a1 = self.layer_2_a(a)           # ③ action 只做线性映射
-        h1   = F.relu(h_s1 + h_a1)         # ④ 汇合后再一次 ReLU
-        q1   = self.layer_3(h1)
+    """TD3 双 Q 网络，状态经 GAT 编码"""
+    def __init__(self,
+                 act_dim: int,
+                 embed_dim: int = 32,
+                 max_range: float = 10.0,
+                 device: str | torch.device = "cpu"):
+        super().__init__()
+        self.device     = torch.device(device)
+        self.max_range  = max_range
 
-        # ----- Q2 -----
-        h_s2 = F.relu(self.layer_4(s))
-        h_s2 = self.layer_5_s(h_s2)
-        h_a2 = self.layer_5_a(a)
-        h2   = F.relu(h_s2 + h_a2)
-        q2   = self.layer_6(h2)
-        return q1, q2
+        # ── 图常量 ───────────────────────────────────
+        self.register_buffer("edge_index", EDGE_INDEX_CONST,  persistent=False)
+        self.register_buffer("angle_feat", ANGLE_FEAT_CONST,  persistent=False)
+
+        # ── 共享 GAT 编码器 ──────────────────────────
+        self.encoder = Critic._Encoder(embed_dim)
+
+        # ── 两条 Q-net ──────────────────────────────
+        def q_net():
+            return nn.Sequential(
+                nn.Linear(embed_dim + act_dim, 800), nn.ReLU(),
+                nn.Linear(800, 600),                 nn.ReLU(),
+                nn.Linear(600, 1)
+            )
+        self.Q1, self.Q2 = q_net(), q_net()
+
+    # ---------- 单图构图 ----------
+    @torch.no_grad()
+    def _build_single(self, state24_t: torch.Tensor) -> Data:
+        laser  = (state24_t[:20] / self.max_range).unsqueeze(1)       # (20,1)
+        angle  = self.angle_feat                                      # (20,2)
+        zeros3 = torch.zeros(20, 4, device=self.device)
+        sector = torch.cat([laser, angle, zeros3], dim=1)             # (20,7)
+
+        robot  = state24_t[20:].unsqueeze(0)                          # (1,4)
+        zeros1 = torch.zeros(1, 3, device=self.device)
+        robot  = torch.cat([zeros1, robot], dim=1)                    # (1,7)
+
+        x = torch.cat([sector, robot], dim=0)                         # (21,7)
+        batch_vec = torch.zeros(21, dtype=torch.long, device=self.device)
+        return Data(x=x, edge_index=self.edge_index, batch=batch_vec)
+
+    # ---------- 批量构图 ----------
+    @torch.no_grad()
+    def _build_batch(self, flat_t: torch.Tensor) -> Data:
+        B = flat_t.size(0)
+        laser  = (flat_t[:, :20] / self.max_range).unsqueeze(-1)           # (B,20,1)
+        angle  = self.angle_feat.unsqueeze(0).expand(B, -1, -1)            # (B,20,2)
+        zeros3 = torch.zeros(B, 20, 4, device=self.device)
+        sector = torch.cat([laser, angle, zeros3], dim=-1)                 # (B,20,7)
+
+        robot  = flat_t[:, 20:].unsqueeze(1)                               # (B,1,4)
+        zeros1 = torch.zeros(B, 1, 3, device=self.device)
+        robot  = torch.cat([zeros1, robot], dim=-1)                        # (B,1,7)
+
+        x = torch.cat([sector, robot], dim=1).reshape(B * 21, 7)
+        ei  = self.edge_index.unsqueeze(0).repeat(B, 1, 1)
+        offset = (torch.arange(B, device=self.device) * 21).view(B, 1, 1)
+        eiB = (ei + offset).reshape(2, -1)
+        batch_vec = torch.repeat_interleave(torch.arange(B, device=self.device), 21)
+        return Data(x=x, edge_index=eiB, batch=batch_vec)
+
+    # ---------- 统一调度 ----------
+    @torch.no_grad()
+    def _build_graph(self, state24):
+        if isinstance(state24, np.ndarray):
+            state24 = torch.from_numpy(state24).float()
+        state24 = state24.to(self.device)
+        if state24.dim() == 1:
+            return self._build_single(state24)
+        else:
+            return self._build_batch(state24)
+
+    # ---------- forward ----------
+    def forward(self, state, act):
+        """
+        state : (24,) or (B,24) or Data/Batch
+        act   : (act_dim,) or (B, act_dim)
+        """
+        # 1) 把 state 编码成 embed
+        if isinstance(state, (Data, Batch)):
+            z = self.encoder(state)               # (B, embed_dim)
+        else:
+            if isinstance(state, np.ndarray):
+                state = torch.from_numpy(state).float()
+            if state.dim() == 1:
+                state = state.unsqueeze(0)        # (1,24)
+            graph = self._build_graph(state)      # Data/Batch
+            z = self.encoder(graph)               # (B, embed_dim)
+
+        # 2) 拼接动作
+        if act.dim() == 1:
+            act = act.unsqueeze(0)
+        sa = torch.cat([z, act.to(z.device)], dim=-1)
+
+        # 3) 双 Q 输出
+        return self.Q1(sa), self.Q2(sa)
 class OUNoise:
     def __init__(self, action_dim=2, mu=0.0, theta=0.00006, sigma=1, sigma_min=0.05, sigma_decay_steps=30000):
         """
@@ -165,14 +358,14 @@ device = torch.device( "cpu")  # cuda or cpu
 class TD3(object):
     def __init__(self, state_dim, action_dim, max_action):
         # Initialize the Actor network
-        self.actor = Actor(state_dim, action_dim).to(device)
-        self.actor_target = Actor(state_dim, action_dim).to(device)
+        self.actor = Actor(128,action_dim).to(device)
+        self.actor_target = Actor(128,action_dim).to(device)
         self.actor_target.load_state_dict(self.actor.state_dict())
  
 
         # Initialize the Critic networks
-        self.critic = Critic(state_dim, action_dim).to(device)
-        self.critic_target = Critic(state_dim, action_dim).to(device)
+        self.critic = Critic(16,action_dim).to(device)
+        self.critic_target = Critic(16,action_dim).to(device)
         self.critic_target.load_state_dict(self.critic.state_dict())
 
     
@@ -184,6 +377,7 @@ class TD3(object):
         self.critic.share_memory()
         self.actor_target.share_memory()
         self.critic_target.share_memory()
+    @torch.no_grad()
     def get_action(self, state):
         # Function to get the action from the actor
         state = torch.Tensor(state.reshape(1, -1)).to(device)
@@ -249,61 +443,61 @@ class TD3(object):
             U_s=torch.Tensor(batch_U_s).to(device)
             omega=torch.Tensor(batch_omega).to(device)
 
-            # Obtain the estimated action from the next state by using the actor-target
-            next_action = self.actor_target(next_state)
+        #     # Obtain the estimated action from the next state by using the actor-target
+        #     next_action = self.actor_target(next_state)
 
-            # Add noise to the action
-            noise = torch.Tensor(batch_actions).data.normal_(0, policy_noise).to(device)
-            noise = noise.clamp(-noise_clip, noise_clip)
-            next_action = (next_action + noise).clamp(-self.max_action, self.max_action)
+        #     # Add noise to the action
+        #     noise = torch.Tensor(batch_actions).data.normal_(0, policy_noise).to(device)
+        #     noise = noise.clamp(-noise_clip, noise_clip)
+        #     next_action = (next_action + noise).clamp(-self.max_action, self.max_action)
 
-            # Calculate the Q values from the critic-target network for the next state-action pair
-            target_Q1, target_Q2 = self.critic_target(next_state, next_action)
+        #     # Calculate the Q values from the critic-target network for the next state-action pair
+        #     target_Q1, target_Q2 = self.critic_target(next_state, next_action)
 
-            # Select the minimal Q value from the 2 calculated values
-            target_Q = torch.min(target_Q1, target_Q2)
-            av_Q += torch.mean(target_Q)
-            max_Q = max(max_Q, torch.max(target_Q))
-            # Calculate the final Q value from the target network parameters by using Bellman equation
-            target_Q = reward + ((1 - done) * discount * target_Q).detach()
+        #     # Select the minimal Q value from the 2 calculated values
+        #     target_Q = torch.min(target_Q1, target_Q2)
+        #     av_Q += torch.mean(target_Q)
+        #     max_Q = max(max_Q, torch.max(target_Q))
+        #     # Calculate the final Q value from the target network parameters by using Bellman equation
+        #     target_Q = reward + ((1 - done) * discount * target_Q).detach()
 
-            # Get the Q values of the basis networks with the current parameters
-            current_Q1, current_Q2 = self.critic(state, action)
+        #     # Get the Q values of the basis networks with the current parameters
+        #     current_Q1, current_Q2 = self.critic(state, action)
 
 
-            with torch.no_grad():
-                dccs_batch = torch.mean(torch.abs(current_Q1 - current_Q2)).item()
-              #  print(dccs_batch)
-                dccs_buf.append(dccs_batch)        # 推入滑窗
+        #     with torch.no_grad():
+        #         dccs_batch = torch.mean(torch.abs(current_Q1 - current_Q2)).item()
+        #       #  print(dccs_batch)
+        #         dccs_buf.append(dccs_batch)        # 推入滑窗
 
             
-            #q_PF = q_PF.view(-1, 1)
-           #print(f"q_PF shape: {q_PF.shape}")
-            #print("action:",action)
-            #print("q_PF",action[:,0],U_s,action[:,1],omega,q_PF)
-          #  F_C_Ei = F.mse_loss(current_Q1, q_PF) + F.mse_loss(current_Q2, q_PF)
-            # Calculate the loss between the current Q value and the target Q value
-            critic_sub_loss = F.mse_loss(current_Q1, target_Q) + F.mse_loss(current_Q2, target_Q)
-            #loss = (1-beta)*critic_sub_loss+beta*F_C_Ei
-            loss = critic_sub_loss
-            # Perform the gradient descent
-            critic_optimizer.zero_grad()
-            loss.backward()
-            critic_optimizer.step()
+        #     #q_PF = q_PF.view(-1, 1)
+        #    #print(f"q_PF shape: {q_PF.shape}")
+        #     #print("action:",action)
+        #     #print("q_PF",action[:,0],U_s,action[:,1],omega,q_PF)
+        #   #  F_C_Ei = F.mse_loss(current_Q1, q_PF) + F.mse_loss(current_Q2, q_PF)
+        #     # Calculate the loss between the current Q value and the target Q value
+        #     critic_sub_loss = F.mse_loss(current_Q1, target_Q) + F.mse_loss(current_Q2, target_Q)
+        #     #loss = (1-beta)*critic_sub_loss+beta*F_C_Ei
+        #     loss = critic_sub_loss
+        #     # Perform the gradient descent
+        #     critic_optimizer.zero_grad()
+        #     loss.backward()
+        #     critic_optimizer.step()
 
-            # ======= 新增：Critic 稳定性判定 =======
-            if len(dccs_buf) == dccs_window:
-                dccs_avg = sum(dccs_buf) / dccs_window
-                dccs_std = (sum((x - dccs_avg) ** 2 for x in dccs_buf) / dccs_window) ** 0.5
-                if dccs_avg<0:
-                    print("111111111111111111111111111111111111111111111",dccs_avg)
-                dccs_avg_queue.put(( (1.0*dccs_avg), counter_epoch))
-                dccs_std_queue.put(( (1.0*dccs_std), counter_epoch))
-               # Critic_Loss_queue.put()
-            #    dccs_std_queue,
-                # 判定一次即可，将标志置真
-                if (dccs_avg < eps_dccs) and (dccs_std < eps_dccs * 0.5):
-                    critic_stable = True
+            # # ======= 新增：Critic 稳定性判定 =======
+            # if len(dccs_buf) == dccs_window:
+            #     dccs_avg = sum(dccs_buf) / dccs_window
+            #     dccs_std = (sum((x - dccs_avg) ** 2 for x in dccs_buf) / dccs_window) ** 0.5
+            #     if dccs_avg<0:
+            #         print("111111111111111111111111111111111111111111111",dccs_avg)
+            #     dccs_avg_queue.put(( (1.0*dccs_avg), counter_epoch))
+            #     dccs_std_queue.put(( (1.0*dccs_std), counter_epoch))
+            #    # Critic_Loss_queue.put()
+            # #    dccs_std_queue,
+            #     # 判定一次即可，将标志置真
+            #     if (dccs_avg < eps_dccs) and (dccs_std < eps_dccs * 0.5):
+            #         critic_stable = True
 
             if it % policy_freq == 0:
                 # Maximize the actor output value by performing gradient descent on negative Q values
@@ -314,7 +508,7 @@ class TD3(object):
               #  combined_action = torch.cat((U_s, omega), dim=1)
                 predicted_action=self.actor(state)
 
-                actor_grad, _ = self.critic(state, predicted_action)
+           #     actor_grad, _ = self.critic(state, predicted_action)
                 q_PF = ((1 - torch.cos(predicted_action[:, 0] - U_s)) + (1 - torch.cos(predicted_action[:, 1] - omega)))
                 #actor_grad=actor_grad.detach()
                 #actor_grad = -(1-Lamda)*actor_grad.mean()+Lamda*F.mse_loss(predicted_action,combined_action)
@@ -339,7 +533,7 @@ class TD3(object):
                 # if cos_sim < 0:  # 方向不一致
                 #     actor_grad_combined = q_PF_normalized.mean()  # 优先采用TD3，并转换为标量
                 # else:
-                actor_grad_combined = (-(1 - Lamda) * actor_grad + Lamda * q_PF).mean()  # 结合APF和TD3，并转换为标量
+                actor_grad_combined = (Lamda * q_PF).mean()   # 结合APF和TD3，并转换为标量
                 #actor_grad_combined = q_PF_normalized.mean()
                 #actor_grad = -(1-Lamda)*actor_grad_normalized.mean()+Lamda*q_PF_normalized.mean()
                 actor_optimizer.zero_grad()
@@ -363,14 +557,14 @@ class TD3(object):
                         tau * param.data + (1 - tau) * target_param.data
                     )
 
-            c_av_loss += loss
+       #     c_av_loss += loss
             a_av_loss+=actor_grad_combined
         self.iter_count += 1
         # Write new values for tensorboard
-        Critic_Loss_queue.put(( (1.0*c_av_loss / iterations).detach(), counter_epoch))
+        #Critic_Loss_queue.put(( (1.0*c_av_loss / iterations).detach(), counter_epoch))
         Actor_Loss_queue.put(( (1.0*a_av_loss / iterations).detach(), counter_epoch))
-        Av_Q_queue.put(( (1.0*av_Q / iterations).detach(), counter_epoch))
-        Max_Q_queue.put(( (1.0*max_Q).detach(), counter_epoch))
+        # Av_Q_queue.put(( (1.0*av_Q / iterations).detach(), counter_epoch))
+        # Max_Q_queue.put(( (1.0*max_Q).detach(), counter_epoch))
         # writer.add_scalar("Critic-Loss", c_av_loss / iterations, counter_epoch)
         # writer.add_scalar("Actor-Loss", a_av_loss / iterations,counter_epoch)
         # writer.add_scalar("Av. Q", av_Q / iterations, counter_epoch)
@@ -411,7 +605,7 @@ def worker(t,network,counter_epoch,counter_epoch_success,param,success_queue,rew
     policy_noise = 0.2  # Added noise for exploration
     noise_clip = 0.5  # Maximum clamping values of the noise
     policy_freq = 2  # Frequency of Actor network updates
-    buffer_size = 1e4  # Maximum size of the buffer
+    buffer_size = 1e6  # Maximum size of the buffer
     file_name = "TD3_velodyne"  # name of the file to store the policy
     save_model = True # Weather to save the model or not
     load_model = False # Weather to load a stored model
@@ -543,28 +737,28 @@ def worker(t,network,counter_epoch,counter_epoch_success,param,success_queue,rew
                             speed_all=0
                             W_SPEED_all=0
                         #print("oooooooooooooooooooooooooo")
-                    #     if timestep != 0:
-                    # #        print("ttttttttttttttttttttttttttttttttttttttt")
-                    #         network.train(
-                    #             replay_buffer,
-                    #             episode_timesteps,
-                    #             #writer,
-                    #             Critic_Loss_queue,
-                    #             Actor_Loss_queue,
-                    #             dccs_avg_queue,
-                    #             dccs_std_queue,
-                    #             Av_Q_queue,
-                    #             Max_Q_queue,
-                    #             counter_epoch_all.value,
-                    #             batch_size,
-                    #             discount,
-                    #             tau,
-                    #             policy_noise,
-                    #             noise_clip,
-                    #             policy_freq,
-                    #             beta.value,
-                    #             Lamda.value
-                    #         )
+                        if timestep != 0:
+                    #        print("ttttttttttttttttttttttttttttttttttttttt")
+                            network.train(
+                                replay_buffer,
+                                episode_timesteps,
+                                #writer,
+                                Critic_Loss_queue,
+                                Actor_Loss_queue,
+                                dccs_avg_queue,
+                                dccs_std_queue,
+                                Av_Q_queue,
+                                Max_Q_queue,
+                                counter_epoch_all.value,
+                                batch_size,
+                                discount,
+                                tau,
+                                policy_noise,
+                                noise_clip,
+                                policy_freq,
+                                beta.value,
+                                Lamda.value
+                            )
     
                     if timesteps_since_eval >= eval_freq:
                         #print("Validating")
@@ -812,7 +1006,7 @@ if __name__ == '__main__':
        # beta_Lamda_decay.value = beta.value*1.0 / decay_steps  # 计算结果也是浮点数
       #  beta_Lamda_decay.value=0
     #print("dsadsadsa:",beta.value,Lamda.value,decay_steps,beta_Lamda_decay.value)
-    logdir = f"./max_speed_1_collsion_dist_0.45_k_250_threshold_0.45_1/reward+{scale_to_goal}+{obs_scale}+{logtest}+{test}+{up_speed}+{smoothness_scale}+{acceleration_scale}+{ounoise_decay_step}+{step_penalty}"
+    logdir = f"./max_speed_1_collsion_dist_0.45_k_250_threshold_0.45_7/reward+{scale_to_goal}+{obs_scale}+{logtest}+{test}+{up_speed}+{smoothness_scale}+{acceleration_scale}+{ounoise_decay_step}+{step_penalty}"
     processes=[]
     params={'n_workers':20,
             'n_loggers':2,

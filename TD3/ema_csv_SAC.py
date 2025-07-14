@@ -24,9 +24,9 @@
 """
 
 # ==================== 0. 可调参数 ====================
-BASE_DIR   = "./SAC/max_speed_1_collsion_dist_0.45_k_250_threshold_0.45_2"
-SUBFMT     = "reward+0.05+40.0+0.0+{idx}.0+740.0+0.0+0.0+600.0+-0.0003+0.0001"
-IDX_RANGE  = range(3,4)
+BASE_DIR   = "./dynamic/SAC/max_speed_1_collsion_dist_0.45_k_250_threshold_0.45_2"
+SUBFMT     = "reward+0.05+40.0+0.0+{idx}.0+740.0+0.0+0.0+600.0+-0.0003+1e-05"
+IDX_RANGE  = range(5,6)
 EXCLUDE    = set()
 
 # 指标名 → 对应 CSV 文件名

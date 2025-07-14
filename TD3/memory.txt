@@ -123,7 +123,7 @@ reward+0.05+40.0+0.0+11.0+740.0+0.0+0.0+600.0+-0.0003+1e-04是 critic_lr = 3e-4 
 
 dynamic:
 TD3.csv是45两个平均
-apf是37
+apf是37,episode_step用的36
 DDPG用33
 SAC是5
 

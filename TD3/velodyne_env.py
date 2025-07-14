@@ -164,7 +164,7 @@ class GazeboEnv:
         self.last_odom = None
         self.obs_points=[]
         self.set_self_state = ModelState()
-        self.set_self_state.model_name = "zzx_run_robot"#zzx
+        self.set_self_state.model_name = "lzh_run_robot"#zzx
         self.set_self_state.pose.position.x = 0.0
         self.set_self_state.pose.position.y = 0.0
         self.set_self_state.pose.position.z = 0.0
@@ -316,6 +316,7 @@ class GazeboEnv:
         vel_cmd.linear.x = action[0]
         vel_cmd.angular.z = action[1]
         self.vel_pub.publish(vel_cmd)
+        print(action)
         self.publish_markers(action)
 
         rospy.wait_for_service("/gazebo/unpause_physics")
@@ -422,6 +423,7 @@ class GazeboEnv:
             print("/gazebo/reset_simulation service call failed")
 
         self.angle = np.random.uniform(-np.pi, np.pi)
+        self.angle=0
         quaternion = Quaternion.from_euler(0.0, 0.0, self.angle)
         object_state = self.set_self_state
         self.change_goal()
@@ -445,8 +447,8 @@ class GazeboEnv:
             #         box_ok=False
             # if  x>-4 and x<-2 and y>-7 and y<3:
             #         box_ok=False
-        object_state.pose.position.x = x
-        object_state.pose.position.y = y
+        object_state.pose.position.x =0
+        object_state.pose.position.y = 0
         # object_state.pose.position.z = 0.
         object_state.pose.orientation.x = quaternion.x
         object_state.pose.orientation.y = quaternion.y

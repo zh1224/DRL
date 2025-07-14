@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*
 
+from copy import deepcopy
 import os
 import time
 import math
@@ -16,7 +17,7 @@ from torch.nn import functional as F
 from collections import deque
 import torch.multiprocessing as mp #A
 from replay_buffer_graph import ReplayBuffer
-from velodyne_env_graph import GazeboEnv
+from velodyne_env import GazeboEnv
 from torch_geometric.nn import GATv2Conv, global_mean_pool
 from torch_geometric.data import Data
 from torch_geometric.data import Data, Batch
@@ -24,17 +25,22 @@ from torch_geometric.data import Data, Batch
 # =============================================================
 
 # ────────────────── 全局常量 ──────────────────
+torch.set_printoptions(sci_mode=False, precision=4)
 N_NODES = 21                                         # 20 LiDAR + 1 Robot
-row = torch.arange(N_NODES).repeat(N_NODES)
-col = torch.arange(N_NODES).repeat_interleave(N_NODES)
-EDGE_INDEX_CONST = torch.stack([row, col], dim=0)    # (2, 441)
+robot_idx = torch.full((20,), 20)
+lidar_idx = torch.arange(20)
+
+row = torch.cat([robot_idx, lidar_idx])
+col = torch.cat([lidar_idx, robot_idx])
+
+EDGE_INDEX_CONST = torch.stack([row, col], dim=0)  # (2, 40)
+
 
 # 20 条分界：-90° … +90°
-bound = torch.linspace(-np.pi/2-0.03, np.pi/2, 21)[:-1]      # (20,)
+bound = torch.linspace(-np.pi/2, np.pi/2, 21)[:-1]      # (20,)
 # 右移半扇区 π/20 (=9°) 得中心角
 angles = bound + np.pi/20
 ANGLE_FEAT_CONST = torch.stack([torch.sin(angles), torch.cos(angles)], 1)  # (20,2)
-
 
 def evaluate(network, env,epoch, eval_episodes,success_queue,win):
     avg_reward = 0.0
@@ -70,222 +76,144 @@ def evaluate(network, env,epoch, eval_episodes,success_queue,win):
     # print("..............................................")
     return avg_reward
 
-
-# ── Actor with nested Encoder ──────────────────
-class Actor(nn.Module):
-    # ---------- 嵌套的 GAT 编码器 ----------
-    class _Encoder(nn.Module):
-        def __init__(self, embed_dim=32, heads=4):
-            super().__init__()
-            self.g1 = GATv2Conv(7, 64, heads=heads, concat=True)
-            self.g2 = GATv2Conv(64*heads, embed_dim, heads=1, concat=False)
-
-        def forward(self, data: Data, flatten=False):
-            
-            x = F.elu(self.g1(data.x, data.edge_index))
-            x = self.g2(x, data.edge_index)              # (N_total, embed_dim)
-
-            if flatten:
-                B = int(data.batch.max()) + 1            # 图数
-           #     print("B:",x.view(B, -1))
-                return x.view(B, -1)                     # (B, 21*embed_dim)
-            else:
-                return global_mean_pool(x, data.batch)   # (B, embed_dim)
-
-    # ---------- Actor 本体 ----------
-    def __init__(self, embed_dim=64, act_dim=2,
-                 max_range=10.0, device="cpu"):
+class GATEncoder(nn.Module):
+    def __init__(self, in_dim=7, embed_dim=128, heads=2, dropout=0.1):
         super().__init__()
-        self.device     = torch.device(device)
-        self.max_range  = max_range
+        self.conv = GATv2Conv(in_dim, embed_dim, heads=heads,
+                              concat=True, dropout=dropout)
+        # 注意：输出维度是 embed_dim * heads
 
-        # 1) 注册常量
-        self.register_buffer("edge_index", EDGE_INDEX_CONST,  persistent=False)
-        self.register_buffer("angle_feat", ANGLE_FEAT_CONST,  persistent=False)
+    def forward(self, data: Data):
+        x = F.elu(self.conv(data.x, data.edge_index))  
+        # 直接全局平均池化到图级特征： (B, embed_dim*heads)
+        return global_mean_pool(x, data.batch)
+    
 
-        # 2) 嵌入式 GAT 编码器
-        self.encoder = Actor._Encoder(embed_dim)
-        f_in=embed_dim
-        # 3) MLP Head
-               # 21 * embed_dim
-        self.fc1  = nn.Linear(f_in, 256)
-        self.fc2  = nn.Linear(256, 256)
-        self.fc3  = nn.Linear(256, act_dim)
+# ── Actor：直接把 Encoder + MLP 定义在一起 ────────────────────────────
+class Actor(nn.Module):
+    def __init__(self, encoder: GATEncoder, 
+                 feat_dim: int, action_dim: int, max_action: float):
+        super().__init__()
+        self.encoder    = encoder
+        self.max_action = max_action
+        # MLP Head
+        self.fc1 = nn.Linear(feat_dim, 800)
+        self.fc2 = nn.Linear(800, 600)
+        self.fc3 = nn.Linear(600, action_dim)
         self.tanh = nn.Tanh()
 
-    # -------- （单/批量）构图函数，同前 --------
-    @torch.no_grad()
-    def _build_single(self, state24):
-        # (24,) → Data
-        laser  = (state24[:20] / self.max_range).unsqueeze(1)
-        angle  = self.angle_feat
-        zeros3 = torch.zeros(20, 4, device=self.device)
-        sector = torch.cat([laser, angle, zeros3], dim=1)
-
-        robot  = state24[20:].unsqueeze(0)
-        zeros1 = torch.zeros(1, 3, device=self.device)
-        robot  = torch.cat([zeros1, robot], dim=1)
-
-        x = torch.cat([sector, robot], dim=0)
-        batch_vec = torch.zeros(21, dtype=torch.long, device=self.device)
-        return Data(x=x, edge_index=self.edge_index, batch=batch_vec)
+        # 用于构图：常量 buffer
+        self.register_buffer("edge_index", EDGE_INDEX_CONST, persistent=False)
+        self.register_buffer("angle_feat", ANGLE_FEAT_CONST, persistent=False)
 
     @torch.no_grad()
-    def _build_batch(self, flat):
-        B = flat.size(0)
-        laser  = (flat[:, :20] / self.max_range).unsqueeze(-1)
+    def _build_graph(self, state24):
+        # 与你原逻辑一致的单条 / 批量图构建
+        if isinstance(state24, torch.Tensor) and state24.dim() == 1:
+            flat = state24
+            laser = flat[:20].unsqueeze(1)
+            angle = self.angle_feat
+            zeros3 = torch.zeros(20, 4, device=flat.device)
+            sector = torch.cat([laser, angle, zeros3], dim=1)
+
+            robot = flat[20:].unsqueeze(0)
+            zeros1 = torch.zeros(1, 3, device=flat.device)
+            robot = torch.cat([zeros1, robot], dim=1)
+
+            x = torch.cat([sector, robot], dim=0)
+            batch = torch.zeros(21, dtype=torch.long, device=flat.device)
+            return Data(x=x, edge_index=self.edge_index, batch=batch)
+
+        # 批量情况
+        B = state24.size(0)
+        laser  = state24[:, :20].unsqueeze(-1)
         angle  = self.angle_feat.unsqueeze(0).expand(B, -1, -1)
-        zeros3 = torch.zeros(B, 20, 4, device=self.device)
+        zeros3 = torch.zeros(B, 20, 4, device=state24.device)
         sector = torch.cat([laser, angle, zeros3], dim=-1)
 
-        robot  = flat[:, 20:].unsqueeze(1)
-        zeros1 = torch.zeros(B, 1, 3, device=self.device)
+        robot  = state24[:, 20:].unsqueeze(1)
+        zeros1 = torch.zeros(B, 1, 3, device=state24.device)
         robot  = torch.cat([zeros1, robot], dim=-1)
 
-        x = torch.cat([sector, robot], dim=1).reshape(B*21, 7)
-        ei  = self.edge_index.unsqueeze(0).repeat(B,1,1)
-        offset = (torch.arange(B, device=self.device)*21).view(B,1,1)
-        eiB = (ei + offset).reshape(2, -1)
-        batch_vec = torch.repeat_interleave(torch.arange(B, device=self.device), 21)
-        return Data(x=x, edge_index=eiB, batch=batch_vec)
+        x = torch.cat([sector, robot], dim=1).view(B*21, 7)
+        ei = self.edge_index.unsqueeze(0).repeat(B,1,1)
+        offset = (torch.arange(B, device=state24.device)*21).view(B,1,1)
+        eiB = (ei + offset).view(2, -1)
+        batch = torch.repeat_interleave(torch.arange(B, device=state24.device), 21)
+        return Data(x=x, edge_index=eiB, batch=batch)
 
-    @torch.no_grad()
-    def _build_graph(self, state24):
-        if isinstance(state24, np.ndarray):
-            state24 = torch.from_numpy(state24).float()
-        state24 = state24.to(self.device)
-        if state24.dim() == 1:
-            return self._build_single(state24)
+    def forward(self, state):
+        if isinstance(state, (list, tuple)):
+            state = torch.tensor(state, dtype=torch.float32, device=device)
+        if isinstance(state, torch.Tensor) and state.dim() == 1:
+            data = self._build_graph(state)
         else:
-            return self._build_batch(state24)
-
-    # -------- 前向 --------
-    def forward(self, state24):
-        graph = self._build_graph(state24)
-        #print("Data:",graph)
-     #   print("angel_feat:",ANGLE_FEAT_CONST)
-        nfv   = self.encoder(graph)                 # (B, 21*embed_dim)
-        h = F.relu(self.fc1(nfv))
+            data = self._build_graph(state.to(device))
+        feat = self.encoder(data)                # (B, feat_dim)
+        h = F.relu(self.fc1(feat))
         h = F.relu(self.fc2(h))
-        return self.tanh(self.fc3(h))               # (B, act_dim)
+        return self.max_action * self.tanh(self.fc3(h))
+    def compute_action_from_feat(self, feat: torch.Tensor):
+        """给定已经编码好的图级特征 feat，计算最终动作输出"""
+        h = F.relu(self.fc1(feat))
+        h = F.relu(self.fc2(h))
+        return self.max_action * self.tanh(self.fc3(h))
 
 
 
-
+# ── Critic：同样内置双 Q ────────────────────────────────────────────
 class Critic(nn.Module):
-    class _Encoder(nn.Module):
-        def __init__(self, embed_dim=32, heads=4):
-            super().__init__()
-            self.g1 = GATv2Conv(7, 128, heads=heads, concat=True)
-            self.g2 = GATv2Conv(128*heads, embed_dim, heads=1, concat=False)
-
-        def forward(self, data: Data, flatten=True):
-            x = F.elu(self.g1(data.x, data.edge_index))
-            x = self.g2(x, data.edge_index)              # (N_total, embed_dim)
-
-            if flatten:
-                B = int(data.batch.max()) + 1            # 图数
-                return x.view(B, -1)                     # (B, 21*embed_dim)
-            else:
-                return global_mean_pool(x, data.batch)   # (B, embed_dim)
-
-    """TD3 双 Q 网络，状态经 GAT 编码"""
-    def __init__(self,
-                 act_dim: int,
-                 embed_dim: int = 32,
-                 max_range: float = 10.0,
-                 device: str | torch.device = "cpu"):
+    def __init__(self, encoder: GATEncoder, 
+                 feat_dim: int, action_dim: int):
         super().__init__()
-        self.device     = torch.device(device)
-        self.max_range  = max_range
+        self.encoder = encoder
+        # 双 Q 网络
+        def make_q():
+            return nn.ModuleDict({
+                "s1": nn.Linear(feat_dim, 800),
+                "s2": nn.Linear(800, 600),
+                "a" : nn.Linear(action_dim, 600),
+                "out": nn.Linear(600, 1)
+            })
+        self.Q1 = make_q()
+        self.Q2 = make_q()
 
-        # ── 图常量 ───────────────────────────────────
-        self.register_buffer("edge_index", EDGE_INDEX_CONST,  persistent=False)
-        self.register_buffer("angle_feat", ANGLE_FEAT_CONST,  persistent=False)
+        # 构图时用到的常量
+        self.register_buffer("edge_index", EDGE_INDEX_CONST, persistent=False)
+        self.register_buffer("angle_feat", ANGLE_FEAT_CONST, persistent=False)
 
-        # ── 共享 GAT 编码器 ──────────────────────────
-        self.encoder = Critic._Encoder(embed_dim)
-
-        # ── 两条 Q-net ──────────────────────────────
-        def q_net():
-            return nn.Sequential(
-                nn.Linear(embed_dim + act_dim, 800), nn.ReLU(),
-                nn.Linear(800, 600),                 nn.ReLU(),
-                nn.Linear(600, 1)
-            )
-        self.Q1, self.Q2 = q_net(), q_net()
-
-    # ---------- 单图构图 ----------
-    @torch.no_grad()
-    def _build_single(self, state24_t: torch.Tensor) -> Data:
-        laser  = (state24_t[:20] / self.max_range).unsqueeze(1)       # (20,1)
-        angle  = self.angle_feat                                      # (20,2)
-        zeros3 = torch.zeros(20, 4, device=self.device)
-        sector = torch.cat([laser, angle, zeros3], dim=1)             # (20,7)
-
-        robot  = state24_t[20:].unsqueeze(0)                          # (1,4)
-        zeros1 = torch.zeros(1, 3, device=self.device)
-        robot  = torch.cat([zeros1, robot], dim=1)                    # (1,7)
-
-        x = torch.cat([sector, robot], dim=0)                         # (21,7)
-        batch_vec = torch.zeros(21, dtype=torch.long, device=self.device)
-        return Data(x=x, edge_index=self.edge_index, batch=batch_vec)
-
-    # ---------- 批量构图 ----------
-    @torch.no_grad()
-    def _build_batch(self, flat_t: torch.Tensor) -> Data:
-        B = flat_t.size(0)
-        laser  = (flat_t[:, :20] / self.max_range).unsqueeze(-1)           # (B,20,1)
-        angle  = self.angle_feat.unsqueeze(0).expand(B, -1, -1)            # (B,20,2)
-        zeros3 = torch.zeros(B, 20, 4, device=self.device)
-        sector = torch.cat([laser, angle, zeros3], dim=-1)                 # (B,20,7)
-
-        robot  = flat_t[:, 20:].unsqueeze(1)                               # (B,1,4)
-        zeros1 = torch.zeros(B, 1, 3, device=self.device)
-        robot  = torch.cat([zeros1, robot], dim=-1)                        # (B,1,7)
-
-        x = torch.cat([sector, robot], dim=1).reshape(B * 21, 7)
-        ei  = self.edge_index.unsqueeze(0).repeat(B, 1, 1)
-        offset = (torch.arange(B, device=self.device) * 21).view(B, 1, 1)
-        eiB = (ei + offset).reshape(2, -1)
-        batch_vec = torch.repeat_interleave(torch.arange(B, device=self.device), 21)
-        return Data(x=x, edge_index=eiB, batch=batch_vec)
-
-    # ---------- 统一调度 ----------
     @torch.no_grad()
     def _build_graph(self, state24):
-        if isinstance(state24, np.ndarray):
-            state24 = torch.from_numpy(state24).float()
-        state24 = state24.to(self.device)
-        if state24.dim() == 1:
-            return self._build_single(state24)
+        # 同 Actor 中的实现，可抽成公用函数
+        return Actor._build_graph(self, state24)
+
+    def _q_forward(self, Q, s_feat, a):
+        h_s = F.relu(Q["s1"](s_feat))
+        h_s = Q["s2"](h_s)
+        h_a = Q["a"](a)
+        return Q["out"](F.relu(h_s + h_a))
+
+    def forward(self, state, action):
+        # 构图 & 编码
+        if isinstance(state, torch.Tensor) and state.dim() in (1,2):
+            data = self._build_graph(state)
         else:
-            return self._build_batch(state24)
+            data = state  # 如果外部已组好 Batch(Data)
+        s_feat = self.encoder(data)       # (B, feat_dim)
 
-    # ---------- forward ----------
-    def forward(self, state, act):
-        """
-        state : (24,) or (B,24) or Data/Batch
-        act   : (act_dim,) or (B, act_dim)
-        """
-        # 1) 把 state 编码成 embed
-        if isinstance(state, (Data, Batch)):
-            z = self.encoder(state)               # (B, embed_dim)
-        else:
-            if isinstance(state, np.ndarray):
-                state = torch.from_numpy(state).float()
-            if state.dim() == 1:
-                state = state.unsqueeze(0)        # (1,24)
-            graph = self._build_graph(state)      # Data/Batch
-            z = self.encoder(graph)               # (B, embed_dim)
+        if action.dim() == 1:
+            action = action.unsqueeze(0)
+        action = action.to(s_feat.device)
+        q1 = self._q_forward(self.Q1, s_feat, action)
+        q2 = self._q_forward(self.Q2, s_feat, action)
+        return q1, q2
+    def compute_Q_from_feat(self, feat, action):
+        q1 = self._q_forward(self.Q1, feat, action)
+        q2 = self._q_forward(self.Q2, feat, action)
+        return q1, q2
 
-        # 2) 拼接动作
-        if act.dim() == 1:
-            act = act.unsqueeze(0)
-        sa = torch.cat([z, act.to(z.device)], dim=-1)
 
-        # 3) 双 Q 输出
-        return self.Q1(sa), self.Q2(sa)
+
 class OUNoise:
     def __init__(self, action_dim=2, mu=0.0, theta=0.00006, sigma=1, sigma_min=0.05, sigma_decay_steps=30000):
         """
@@ -343,57 +271,41 @@ class OUNoise:
             
             
 device = torch.device( "cpu")  # cuda or cpu
-# TD3 network
 class TD3(object):
-    def __init__(self, state_dim, action_dim, max_action):
-        # Initialize the Actor network
-        self.actor = Actor(64,action_dim).to(device)
-        self.actor_target = Actor(64,action_dim).to(device)
+    def __init__(self, state_dim, action_dim, max_action,
+                 embed_dim=128, heads=2):
+        # 1) 构建共享 Encoder 及其 target 版
+        self.encoder = GATEncoder(in_dim=7, embed_dim=embed_dim, heads=heads).to(device)
+        self.encoder_target = deepcopy(self.encoder).to(device)
+        
+        feat_dim = embed_dim * heads
+        
+        # 2) Actor & Actor_target
+        self.actor = Actor(self.encoder, feat_dim, action_dim, max_action).to(device)
+        self.actor_target = Actor(self.encoder_target, feat_dim, action_dim, max_action).to(device)
         self.actor_target.load_state_dict(self.actor.state_dict())
- 
-
-        # Initialize the Critic networks
-        self.critic = Critic(16,action_dim).to(device)
-        self.critic_target = Critic(16,action_dim).to(device)
+        
+        # 3) Critic & Critic_target
+        self.critic = Critic(self.encoder, feat_dim, action_dim).to(device)
+        self.critic_target = Critic(self.encoder_target, feat_dim, action_dim).to(device)
         self.critic_target.load_state_dict(self.critic.state_dict())
-
-    
+        
         self.max_action = max_action
-     #   self.writer = SummaryWriter()
         self.iter_count = 0
+
     def share_memory(self):
+        self.encoder.share_memory()
+        self.encoder_target.share_memory()
         self.actor.share_memory()
-        self.critic.share_memory()
         self.actor_target.share_memory()
+        self.critic.share_memory()
         self.critic_target.share_memory()
+
     @torch.no_grad()
-    def get_action(self, state24, noise_std: float = 0.0):
-        """
-        参数
-        ----
-        state24   : (24,)  numpy.ndarray 或 torch.Tensor(float32)
-        noise_std : 探索噪声标准差；0 表示无噪声
-
-        返回
-        ----
-        action_np : (act_dim,) numpy.ndarray
-        """
-        # ---------- 1) numpy → Tensor，搬到 device ----------
-        if isinstance(state24, np.ndarray):
-            state_t = torch.from_numpy(state24).float()
-        else:                               # 已是 Tensor
-            state_t = state24.float()
-
-
-        state_t = state_t.to(device, non_blocking=True)
-
-        # ---------- 2) 前向推理 (Actor 内部会自动 build_graph) ----------
-        action_t = self.actor(state_t).squeeze(0)        # (act_dim,)
-
-     
-        # ---------- 4) 回到 NumPy ----------
-        return action_t.cpu().numpy()
-
+    def get_action(self, state):
+        # state: (state_dim,) numpy 或 Tensor
+        state_tensor = torch.tensor(state.reshape(1, -1), dtype=torch.float32, device=device)
+        return self.actor(state_tensor).cpu().numpy().flatten()
     # training cycle
     def train(
         self,
@@ -428,16 +340,17 @@ class TD3(object):
         # min_lambda  = 0.02         # 衰减下限
 
 
-        critic_lr = 5e-2 # Critic的学习率
+        critic_lr = a_l # Critic的学习率
         actor_lr = a_l # Actor的学习率
         print("actor_lr:",actor_lr)
         critic_optimizer = torch.optim.Adam(self.critic.parameters(),lr=critic_lr)
         actor_optimizer = torch.optim.Adam(self.actor.parameters(),lr=actor_lr)
+        encoder_optimizer = torch.optim.Adam(self.encoder.parameters(),lr=actor_lr)
         av_Q = 0
         max_Q = -inf
         c_av_loss = 0
         a_av_loss = 0
-        for it in range(min(int(iterations),1)):
+        for it in range(iterations):
             # sample a batch from the replay buffer
             (
                 batch_states,
@@ -448,64 +361,63 @@ class TD3(object):
                 batch_U_s,
                 batch_omega,
             ) = replay_buffer.sample_batch(batch_size)
-            # state      = Batch.from_data_list(batch_states).to(device)
-            # next_state = Batch.from_data_list(batch_next_states).to(device)
-
             state = torch.Tensor(batch_states).to(device)
             next_state = torch.Tensor(batch_next_states).to(device)
-            # ★ 仅此一次，把 (B,24) → 图
-            # state   = build_graph_batch(batch_states,  10.0, ANGLE_FEAT_CONST, EDGE_INDEX_CONST, device)
-            # next_state  = build_graph_batch(batch_next_states, 10.0, ANGLE_FEAT_CONST, EDGE_INDEX_CONST, device)
             action = torch.Tensor(batch_actions).to(device)
             reward = torch.Tensor(batch_rewards).to(device)
             done = torch.Tensor(batch_dones).to(device)
             U_s=torch.Tensor(batch_U_s).to(device)
             omega=torch.Tensor(batch_omega).to(device)
 
-        #     # Obtain the estimated action from the next state by using the actor-target
-        #     with torch.inference_mode():          # 更彻底 than no_grad
-        #      next_action = self.actor_target(next_state)
+        # Obtain the estimated action from the next state by using the actor-target
+            # next_action = self.actor_target(next_state)
+            data_next = self.actor_target._build_graph(next_state)
+            feat_next = self.encoder_target(data_next)
+            next_action = self.actor_target.compute_action_from_feat(feat_next)
+            # # Add noise to the action
+            noise = torch.Tensor(batch_actions).data.normal_(0, policy_noise).to(device)
+            noise = noise.clamp(-noise_clip, noise_clip)
+            next_action = (next_action + noise).clamp(-self.max_action, self.max_action)
 
-        #     # Add noise to the action
-        #     noise = torch.Tensor(batch_actions).data.normal_(0, policy_noise).to(device)
-        #     noise = noise.clamp(-noise_clip, noise_clip)
-        #     next_action = (next_action + noise).clamp(-self.max_action, self.max_action)
+            # # Calculate the Q values from the critic-target network for the next state-action pair
+            # target_Q1, target_Q2 = self.critic_target(next_state, next_action)
+            target_Q1, target_Q2 = self.critic_target.compute_Q_from_feat(feat_next, next_action)
+            target_Q = torch.min(target_Q1, target_Q2)
+            # Select the minimal Q value from the 2 calculated values
+            # target_Q = torch.min(target_Q1, target_Q2)
+            av_Q += torch.mean(target_Q)
+            max_Q = max(max_Q, torch.max(target_Q))
+            # # Calculate the final Q value from the target network parameters by using Bellman equation
+            target_Q = reward + ((1 - done) * discount * target_Q).detach()
 
-        #     # Calculate the Q values from the critic-target network for the next state-action pair
-        #     target_Q1, target_Q2 = self.critic_target(next_state, next_action)
-
-        #     # Select the minimal Q value from the 2 calculated values
-        #     target_Q = torch.min(target_Q1, target_Q2)
-        #     av_Q += torch.mean(target_Q)
-        #     max_Q = max(max_Q, torch.max(target_Q))
-        #     # Calculate the final Q value from the target network parameters by using Bellman equation
-        #     target_Q = reward + ((1 - done) * discount * target_Q).detach()
-
-        #     # Get the Q values of the basis networks with the current parameters
-        #     current_Q1, current_Q2 = self.critic(state, action)
+            # Get the Q values of the basis networks with the current parameters
+            current_Q1, current_Q2 = self.critic(state, action)
 
 
-        #     # with torch.no_grad():
-        #     #     dccs_batch = torch.mean(torch.abs(current_Q1 - current_Q2)).item()
-        #     #   #  print(dccs_batch)
-        #     #     dccs_buf.append(dccs_batch)        # 推入滑窗
+            # with torch.no_grad():
+            #     dccs_batch = torch.mean(torch.abs(current_Q1 - current_Q2)).item()
+            #   #  print(dccs_batch)
+            #     dccs_buf.append(dccs_batch)        # 推入滑窗
 
             
-        #     #q_PF = q_PF.view(-1, 1)
-        #    #print(f"q_PF shape: {q_PF.shape}")
-        #     #print("action:",action)
-        #     #print("q_PF",action[:,0],U_s,action[:,1],omega,q_PF)
-        #   #  F_C_Ei = F.mse_loss(current_Q1, q_PF) + F.mse_loss(current_Q2, q_PF)
-        #     # Calculate the loss between the current Q value and the target Q value
-        #     critic_sub_loss = F.mse_loss(current_Q1, target_Q) + F.mse_loss(current_Q2, target_Q)
-        #     #loss = (1-beta)*critic_sub_loss+beta*F_C_Ei
-        #     loss = critic_sub_loss
-        #     # Perform the gradient descent
-        #     critic_optimizer.zero_grad()
-        #     loss.backward()
-        #     critic_optimizer.step()
+            #q_PF = q_PF.view(-1, 1)
+           #print(f"q_PF shape: {q_PF.shape}")
+            #print("action:",action)
+            #print("q_PF",action[:,0],U_s,action[:,1],omega,q_PF)
+          #  F_C_Ei = F.mse_loss(current_Q1, q_PF) + F.mse_loss(current_Q2, q_PF)
+            # Calculate the loss between the current Q value and the target Q value
+            loss = F.mse_loss(current_Q1, target_Q) + F.mse_loss(current_Q2, target_Q)
+            #loss = (1-beta)*critic_sub_loss+beta*F_C_Ei
+          #  loss = critic_sub_loss
+            # Perform the gradient descent
+            
+            critic_optimizer.zero_grad()
+            encoder_optimizer.zero_grad()
+          #  loss.backward()
+            critic_optimizer.step()
+            encoder_optimizer.step()
 
-            # # ======= 新增：Critic 稳定性判定 =======
+            # ======= 新增：Critic 稳定性判定 =======
             # if len(dccs_buf) == dccs_window:
             #     dccs_avg = sum(dccs_buf) / dccs_window
             #     dccs_std = (sum((x - dccs_avg) ** 2 for x in dccs_buf) / dccs_window) ** 0.5
@@ -513,11 +425,11 @@ class TD3(object):
             #         print("111111111111111111111111111111111111111111111",dccs_avg)
             #     dccs_avg_queue.put(( (1.0*dccs_avg), counter_epoch))
             #     dccs_std_queue.put(( (1.0*dccs_std), counter_epoch))
-               # Critic_Loss_queue.put()
-            #    dccs_std_queue,
-                # 判定一次即可，将标志置真
-                # if (dccs_avg < eps_dccs) and (dccs_std < eps_dccs * 0.5):
-                #     critic_stable = True
+            #    # Critic_Loss_queue.put()
+            # #    dccs_std_queue,
+            #     # 判定一次即可，将标志置真
+            #     if (dccs_avg < eps_dccs) and (dccs_std < eps_dccs * 0.5):
+            #         critic_stable = True
 
             if it % policy_freq == 0:
                 # Maximize the actor output value by performing gradient descent on negative Q values
@@ -526,9 +438,19 @@ class TD3(object):
               #  omega = omega.unsqueeze(1)  # 变为 torch.Size([40, 1])
     # 将它们沿着列方向（dim=1）拼接成 [40, 2] 的张量
               #  combined_action = torch.cat((U_s, omega), dim=1)
-                predicted_action=self.actor(state)
+               # predicted_action=self.actor(state)
 
-               # actor_grad, _ = self.critic(state, predicted_action)
+                # 1. 只构图 & 编码一次
+                data = self.actor._build_graph(state)
+                feat = self.encoder(data)
+
+                # 2. 计算当前 actor 输出
+                predicted_action = self.actor.compute_action_from_feat(feat)
+
+
+
+
+                actor_grad, _ = self.critic.compute_Q_from_feat(feat, predicted_action)
                 q_PF = ((1 - torch.cos(predicted_action[:, 0] - U_s)) + (1 - torch.cos(predicted_action[:, 1] - omega)))
                 #actor_grad=actor_grad.detach()
                 #actor_grad = -(1-Lamda)*actor_grad.mean()+Lamda*F.mse_loss(predicted_action,combined_action)
@@ -553,19 +475,18 @@ class TD3(object):
                 # if cos_sim < 0:  # 方向不一致
                 #     actor_grad_combined = q_PF_normalized.mean()  # 优先采用TD3，并转换为标量
                 # else:
-                actor_grad_combined = (Lamda * q_PF).mean()  # 结合APF和TD3，并转换为标量
+                actor_grad_combined = (-(1 - Lamda) * actor_grad + Lamda * q_PF).mean()  # 结合APF和TD3，并转换为标量
                 #actor_grad_combined = q_PF_normalized.mean()
                 #actor_grad = -(1-Lamda)*actor_grad_normalized.mean()+Lamda*q_PF_normalized.mean()
                 actor_optimizer.zero_grad()
+                encoder_optimizer.zero_grad()
                 actor_grad_combined.backward()
                   # ▶▶▶ 在这行和 actor_opt.step() 之间插入打印
                 # print("enc grad mean:",
                 #     sum(p.grad.abs().mean().item() 
                 #         for p in self.actor.encoder.parameters()))
                 actor_optimizer.step()
-
-                # del state,next_state,action,reward,done,U_s,omega
-                # torch.cuda.empty_cache()      # 仅清掉未用缓存，不影响速度
+                encoder_optimizer.step() 
                 # Use soft update to update the actor-target network parameters by
                 # infusing small amount of current parameters
                 for param, target_param in zip(
@@ -582,19 +503,19 @@ class TD3(object):
                     target_param.data.copy_(
                         tau * param.data + (1 - tau) * target_param.data
                     )
-                
-      #      c_av_loss += loss
+                      
+                for param, target_param in zip(self.encoder.parameters(), self.encoder_target.parameters()):
+                    target_param.data.copy_(
+                        tau * param.data + (1 - tau) * target_param.data
+                    )
+            c_av_loss += loss
             a_av_loss+=actor_grad_combined
         self.iter_count += 1
-       # gc.collect()
         # Write new values for tensorboard
-        # Critic_Loss_queue.put(( (1.0*c_av_loss / iterations).detach(), counter_epoch))
+        Critic_Loss_queue.put(( (1.0*c_av_loss / iterations).detach(), counter_epoch))
         Actor_Loss_queue.put(( (1.0*a_av_loss / iterations).detach(), counter_epoch))
-        # Av_Q_queue.put(( (1.0*av_Q / iterations).detach(), counter_epoch))
-        # Max_Q_queue.put(( (1.0*max_Q).detach(), counter_epoch))
-
-
-        
+        Av_Q_queue.put(( (1.0*av_Q / iterations).detach(), counter_epoch))
+        Max_Q_queue.put(( (1.0*max_Q).detach(), counter_epoch))   
         # writer.add_scalar("Critic-Loss", c_av_loss / iterations, counter_epoch)
         # writer.add_scalar("Actor-Loss", a_av_loss / iterations,counter_epoch)
         # writer.add_scalar("Av. Q", av_Q / iterations, counter_epoch)
@@ -603,14 +524,22 @@ class TD3(object):
     def save(self, filename, directory):
         torch.save(self.actor.state_dict(), "%s/%s_actor.pth" % (directory, filename))
         torch.save(self.critic.state_dict(), "%s/%s_critic.pth" % (directory, filename))
+        torch.save(self.encoder.state_dict(),
+                   f"{directory}/{filename}_encoder.pth")
 
     def load(self, filename, directory):
+        self.encoder.load_state_dict(
+            torch.load(f"{directory}/{filename}_encoder.pth")
+        )
         self.actor.load_state_dict(
             torch.load("%s/%s_actor.pth" % (directory, filename))
         )
         self.critic.load_state_dict(
             torch.load("%s/%s_critic.pth" % (directory, filename))
         )
+        self.encoder_target.load_state_dict(self.encoder.state_dict())
+        self.actor_target  .load_state_dict(self.actor.state_dict())
+        self.critic_target .load_state_dict(self.critic.state_dict())
 
 def worker(t,network,counter_epoch,counter_epoch_success,param,success_queue,reward_queue,Critic_Loss_queue,Actor_Loss_queue,Av_Q_queue,Max_Q_queue,succes_all,counter_epoch_all,timestep_worker,expl_noise_episode,reward_all,win,all_step,speed,scale_to_goal,beta,Lamda,beta_Lamda_decay,obs_scale,timestep_episode,logtest,up_speed,smoothness_scale,acceleration_scale,ounoise_decay_step,counter_epoch_collision,collision_queue,counter_epoch_timeout,timeout_queue,step_penalty,W_speed,test,dccs_avg_queue,dccs_std_queue,a_l):
    # writer = SummaryWriter(log_dir=f"runs/1worker_, reward14+nopre") 
@@ -629,17 +558,17 @@ def worker(t,network,counter_epoch,counter_epoch_success,param,success_queue,rew
         30000  # Number of steps over which the initial exploration noise will decay over    default:500000
     )
     expl_min = 0.0  # Exploration noise after the decay in range [0...expl_noise]
-    batch_size = 32  # Size of the mini-batch
+    batch_size = 40  # Size of the mini-batch
     discount = 0.9999999  # Discount factor to calculate the discounted future reward (should be close to 1)     #改环境之后，这个也要对应更改，越小的环境这个越小，之前是0.99999
     tau = 0.005  # Soft target update variable (should be close to 0)
     policy_noise = 0.2  # Added noise for exploration
     noise_clip = 0.5  # Maximum clamping values of the noise
     policy_freq = 2  # Frequency of Actor network updates
-    buffer_size = 1e3  # Maximum size of the buffer
+    buffer_size = 1e6  # Maximum size of the buffer
     file_name = "TD3_velodyne"  # name of the file to store the policy
     save_model = True # Weather to save the model or not
     load_model = False # Weather to load a stored model
-    random_near_obstacle = False # To take random actions near obstacles or not
+    random_near_obstacle = True # To take random actions near obstacles or not
     ou_noise = OUNoise(sigma_decay_steps=ounoise_decay_step)
     # Create the network storage folders
     if not os.path.exists("./results"):
@@ -859,7 +788,7 @@ def worker(t,network,counter_epoch,counter_epoch_success,param,success_queue,rew
         if(True):
            # print("mode predict")
             #print("model predict")
-            action = network.get_action(state)
+            action = network.get_action(np.array(state))
         #    print("model:",action)
           #  noise1=ou_noise.get_noise()
         #     action = (action + np.random.normal(0, expl_noise, size=action_dim)).clip(
@@ -1040,9 +969,9 @@ if __name__ == '__main__':
        # beta_Lamda_decay.value = beta.value*1.0 / decay_steps  # 计算结果也是浮点数
       #  beta_Lamda_decay.value=0
     #print("dsadsadsa:",beta.value,Lamda.value,decay_steps,beta_Lamda_decay.value)
-    logdir = f"./graph/max_speed_1_collsion_dist_0.45_k_250_threshold_0.45_4/reward+{scale_to_goal}+{obs_scale}+{logtest}+{test}+{up_speed}+{smoothness_scale}+{acceleration_scale}+{ounoise_decay_step}+{step_penalty}+{a_l}"
+    logdir = f"./graph/max_speed_1_collsion_dist_0.45_k_250_threshold_0.45_31/reward+{scale_to_goal}+{obs_scale}+{logtest}+{test}+{up_speed}+{smoothness_scale}+{acceleration_scale}+{ounoise_decay_step}+{step_penalty}+{a_l}"
     processes=[]
-    params={'n_workers':20,
+    params={'n_workers':1,
             'n_loggers':2,
             }
     success_queue = mp.Queue()

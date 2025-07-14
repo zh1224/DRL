@@ -1,1 +1,49 @@
 把data数据类型直接放到repaly_buffer里面，会出现内存爆炸，内存一个进程就一直99%，训练一次要好久
+
+
+下面是不用global_means的方法
+max_speed_1_collsion_dist_0.45_k_250_threshold_0.45_2    是state的尝试就是20维度的状态
+
+max_speed_1_collsion_dist_0.45_k_250_threshold_0.45_1    是图的
+
+
+
+max_speed_1_collsion_dist_0.45_k_250_threshold_0.45_4    是把global_means用上了 是图的
+
+max_speed_1_collsion_dist_0.45_k_250_threshold_0.45_3    是state的尝试就是20维度的状态
+
+接下来让heads从4变成1
+max_speed_1_collsion_dist_0.45_k_250_threshold_0.45_5 不太行 改成1试试
+max_speed_1_collsion_dist_0.45_k_250_threshold_0.45_6 换成1也不行
+
+
+max_speed_1_collsion_dist_0.45_k_250_threshold_0.45_7 换成4 然后 embde_dim换成32试试  不太行 换成128试试
+max_speed_1_collsion_dist_0.45_k_250_threshold_0.45_8 heads=4,embde_dim=128
+max_speed_1_collsion_dist_0.45_k_250_threshold_0.45_9 embde_dim=128   heads=16
+
+max_speed_1_collsion_dist_0.45_k_250_threshold_0.45_9 heads=4,embde_dim=128 self.g1 = GATv2Conv(7, 32, heads=heads, concat=True) 之前32的地方是64
+max_speed_1_collsion_dist_0.45_k_250_threshold_0.45_10 届上面的设置，但是heads设置成1
+max_speed_1_collsion_dist_0.45_k_250_threshold_0.45_11   self.g1 = GATv2Conv(7, embed_dim, heads=heads, concat=True) 换成1层试试 其中 embed_dim=128 heads=1
+max_speed_1_collsion_dist_0.45_k_250_threshold_0.45_12   self.g1 = GATv2Conv(7, embed_dim, heads=heads, concat=True) 换成1层试试 其中 embed_dim=32 heads=4
+max_speed_1_collsion_dist_0.45_k_250_threshold_0.45_13   self.g1 = GATv2Conv(7, embed_dim, heads=heads, concat=True) 换成1层试试 其中 embed_dim=16 heads=8
+max_speed_1_collsion_dist_0.45_k_250_threshold_0.45_14   self.g1 = GATv2Conv(7, embed_dim, heads=heads, concat=True) 换成1层试试 其中 embde_dim=256 heads=1
+max_speed_1_collsion_dist_0.45_k_250_threshold_0.45_15   self.g1 = GATv2Conv(7, embed_dim, heads=heads, concat=True) 换成1层试试 其中 embde_dim=64 heads=2
+max_speed_1_collsion_dist_0.45_k_250_threshold_0.45_16   self.g1 = GATv2Conv(7, embed_dim, heads=heads, concat=True) 换成1层试试 其中 embde_dim=32 heads=1
+以下換星型結構試試
+max_speed_1_collsion_dist_0.45_k_250_threshold_0.45_17   self.g1 = GATv2Conv(7, embed_dim, heads=heads, concat=True) 换成1层试试 其中 embde_dim=24 heads=1
+max_speed_1_collsion_dist_0.45_k_250_threshold_0.45_18   self.g1 = GATv2Conv(7, embed_dim, heads=heads, concat=True) 换成1层试试 其中 embde_dim=24 heads=1把data裡面的torch的科學技術法換成了和state裡面一樣的技術法，這樣两个一模一样了
+max_speed_1_collsion_dist_0.45_k_250_threshold_0.45_19   self.g1 = GATv2Conv(7, embed_dim, heads=heads, concat=True) 换成1层试试 其中 embde_dim=64 heads=1
+max_speed_1_collsion_dist_0.45_k_250_threshold_0.45_20   self.g1 = GATv2Conv(7, embed_dim, heads=heads, concat=True) 换成1层试试 其中 embde_dim=128 heads=1
+max_speed_1_collsion_dist_0.45_k_250_threshold_0.45_21   self.g1 = GATv2Conv(7, embed_dim, heads=heads, concat=True) 换成1层试试 其中 embde_dim=256 heads=1
+max_speed_1_collsion_dist_0.45_k_250_threshold_0.45_22   self.g1 = GATv2Conv(7, embed_dim, heads=heads, concat=True) 换成1层试试 其中 embde_dim=64 heads=2
+max_speed_1_collsion_dist_0.45_k_250_threshold_0.45_23   self.g1 = GATv2Conv(7, embed_dim, heads=heads, concat=True) 换成1层试试 其中 embde_dim=32 heads=2
+max_speed_1_collsion_dist_0.45_k_250_threshold_0.45_28   self.g1 = GATv2Conv(7, embed_dim, heads=heads, concat=True) 换成1层试试 其中 embde_dim=128 heads=2
+max_speed_1_collsion_dist_0.45_k_250_threshold_0.45_24   self.g1 = GATv2Conv(7, embed_dim, heads=heads, concat=True) 换成1层试试 其中 embde_dim=64 heads=4
+max_speed_1_collsion_dist_0.45_k_250_threshold_0.45_25   self.g1 = GATv2Conv(7, embed_dim, heads=heads, concat=True) 换成1层试试 其中 embde_dim=32 heads=8
+max_speed_1_collsion_dist_0.45_k_250_threshold_0.45_26   self.g1 = GATv2Conv(7, embed_dim, heads=heads, concat=True) 换成1层试试 其中 embde_dim=64 heads=8
+max_speed_1_collsion_dist_0.45_k_250_threshold_0.45_27   self.g1 = GATv2Conv(7, embed_dim, heads=heads, concat=True) 换成1层试试 其中 embde_dim=16 heads=8
+
+以下尝试加入critic训练
+max_speed_1_collsion_dist_0.45_k_250_threshold_0.45_29   self.g1 = GATv2Conv(7, embed_dim, heads=heads, concat=True) 换成1层试试 其中 embde_dim=128 heads=2   可以在人工市场法下达到0.8成功率
+max_speed_1_collsion_dist_0.45_k_250_threshold_0.45_30   self.g1 = GATv2Conv(7, embed_dim, heads=heads, concat=True) 换成1层试试 其中 embde_dim=128 heads=2    加入正常训练看看 太卡了 下面实验只用一个encoder
+max_speed_1_collsion_dist_0.45_k_250_threshold_0.45_31   self.g1 = GATv2Conv(7, embed_dim, heads=heads, concat=True) 换成1层试试 其中 embde_dim=128 heads=2

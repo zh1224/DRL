@@ -9,7 +9,6 @@ from sklearn.cluster import DBSCAN
 from scipy.spatial import ConvexHull
 import numpy as np
 import rospy
-import torch
 import sensor_msgs.point_cloud2 as pc2
 from gazebo_msgs.msg import ModelState
 from geometry_msgs.msg import Twist
@@ -19,7 +18,6 @@ from squaternion import Quaternion
 from std_srvs.srv import Empty
 from visualization_msgs.msg import Marker
 from visualization_msgs.msg import MarkerArray
-from torch_geometric.data import Data
 GOAL_REACHED_DIST = 0.7
 COLLISION_DIST = 0.45   #小范围需要改称0.15，原来是0.35  
 TIME_DELTA = 0.1
@@ -229,39 +227,7 @@ class GazeboEnv:
 
     # Read velodyne pointcloud and turn it into distance data, then select the minimum value for each angle
     # range as state representation
-
-    def build_graph(self, robot_state, max_range=10.0, device="cpu"):
-        laser_dist = torch.as_tensor(self.velodyne_data, dtype=torch.float32, device=device)  # [20]
-        laser_norm = laser_dist / max_range
-
-        # ---------- 1) 扇区节点 3 维 ----------
-        angles = torch.linspace(-math.pi/2, math.pi/2, steps=len(laser_dist), device=device)
-        angle_feat  = torch.stack([torch.sin(angles), torch.cos(angles)], dim=1)              # [20,2]
-        sector_3d   = torch.cat([laser_norm.unsqueeze(1), angle_feat], dim=1)                # [20,3]
-
-        # ---------- 2) 补 4 个 0 变 7 维 ----------
-        pad_zero4   = torch.zeros(len(laser_dist), 4, device=device)                         # [20,4]
-        sector_feat = torch.cat([sector_3d, pad_zero4], dim=1)                               # [20,7]
-
-        # ---------- 3) 机器人节点 ----------
-        robot_3d = torch.zeros(1, 3, device=device)                                          # 距离/角度占位
-        robot_4d = robot_state.to(device).unsqueeze(0)                                       # [1,4]
-        robot_feat = torch.cat([robot_3d, robot_4d], dim=1)                                  # [1,7]
-
-        # ---------- 4) 拼成 21×7 ----------
-        x = torch.cat([sector_feat, robot_feat], dim=0)                                      # [21,7]
-
-        # ---------- 5) 完全图边 ----------
-        num_nodes  = x.size(0)
-        row = torch.arange(num_nodes, device=device).repeat(num_nodes)
-        col = torch.arange(num_nodes, device=device).repeat_interleave(num_nodes)
-        edge_index = torch.stack([row, col], dim=0)
-
-        return Data(x=x, edge_index=edge_index)
-
-
-
-
+       
     def velodyne_callback(self, v):
         self.obs_points.clear()
         data = list(pc2.read_points(v, skip_nans=False, field_names=("x", "y", "z")))
@@ -301,7 +267,6 @@ class GazeboEnv:
                 #        print(obs_position_x,obs_position_y)
                         
                         break
-                        
      
     def calculate_total_repulsion_force(self,x_robot, y_robot,force_magnitude_attract):
         total_force_x = 0
@@ -440,11 +405,8 @@ class GazeboEnv:
             done = True
         if collision:
             self.collision_check=True
-        robot_state = [distance, theta, 0.0, 0.0]
-        # robot_state_np = np.array([distance, theta, 0, 0],  # [4]
-        #                       dtype=np.float32)
-        # robot_state_t  = torch.from_numpy(robot_state_np)
-        # state = self.build_graph(robot_state_t, max_range=10.0)
+        robot_state = [distance, theta, action[0], action[1]]
+        
         state = np.append(laser_state, robot_state)
         reward = self.get_reward(self,target, collision, action, min_laser,last_state,omega,distance)
         return state, reward, done, target
@@ -499,7 +461,7 @@ class GazeboEnv:
 
                 # randomly scatter boxes in the environment
         cylinder=[]
-        for i in range(6):
+        for i in range(2):
             name = "drc_practice_blue_cylinder_" + str(i)
 
             x = 0
@@ -512,7 +474,7 @@ class GazeboEnv:
                 for j in cylinder:
                     dx=abs(x-j[0])
                     dy=abs(y-j[1])
-                    if  np.linalg.norm([dx,  dy]) < 4:                                                                                                                             
+                    if  np.linalg.norm([dx, dy]) < 4:                                                                                                                             
                         box_ok=False
                         break
                 # if  x<2 and x>-8 and y>-3.5 and y<-1.5:
@@ -590,12 +552,7 @@ class GazeboEnv:
             theta = np.pi - theta
 
         robot_state = [distance, theta, 0.0, 0.0]
-        # robot_state_np = np.array([distance, theta, 0, 0],  # [4]
-        #                       dtype=np.float32)
-        # robot_state_t  = torch.from_numpy(robot_state_np)
-        # state = self.build_graph(robot_state_t, max_range=10.0)
         state = np.append(laser_state, robot_state)
- 
         return state
 
     def change_goal(self):

@@ -1,0 +1,904 @@
+90.11511826515198
+
+timeout list:
+
+episodetime_list:
+218
+
+Episode real time list (seconds):
+90.12
+
+average_speed_list:
+1.0045871559633028
+
+decision_time_list:
+0.001413800468155153
+
+Path length list:
+10.151751046338621
+78.75189590454102
+
+timeout list:
+
+episodetime_list:
+141
+
+Episode real time list (seconds):
+78.75
+
+average_speed_list:
+1.0070921985815602
+
+decision_time_list:
+0.0015105095463689312
+
+Path length list:
+6.713344527846907
+105.36377382278442
+
+timeout list:
+
+episodetime_list:
+247
+
+Episode real time list (seconds):
+105.36
+
+average_speed_list:
+1.0040485829959513
+
+decision_time_list:
+0.0013059070040443573
+
+Path length list:
+10.710530930961646
+438.02328276634216
+
+timeout list:
+3
+
+episodetime_list:
+999
+
+Episode real time list (seconds):
+438.02
+
+average_speed_list:
+0.9250066796759585
+
+decision_time_list:
+0.0015534652865407206
+
+Path length list:
+6.344876433392729
+71.24961876869202
+
+timeout list:
+
+episodetime_list:
+149
+
+Episode real time list (seconds):
+71.25
+
+average_speed_list:
+1.0067114093959733
+
+decision_time_list:
+0.0015877541486680159
+
+Path length list:
+6.920133627851644
+79.22689509391785
+
+timeout list:
+
+episodetime_list:
+227
+
+Episode real time list (seconds):
+79.23
+
+average_speed_list:
+1.0044052863436124
+
+decision_time_list:
+0.001359479052464925
+
+Path length list:
+9.847431851223407
+100.50588369369507
+
+timeout list:
+
+episodetime_list:
+253
+
+Episode real time list (seconds):
+100.51
+
+average_speed_list:
+1.0039525691699605
+
+decision_time_list:
+0.0013269938298698014
+
+Path length list:
+10.21520652538841
+92.81559038162231
+
+timeout list:
+
+episodetime_list:
+225
+
+Episode real time list (seconds):
+92.82
+
+average_speed_list:
+1.0044444444444445
+
+decision_time_list:
+0.0014275304129114375
+
+Path length list:
+10.083314110544002
+142.59599566459656
+
+timeout list:
+
+episodetime_list:
+262
+
+Episode real time list (seconds):
+142.60
+
+average_speed_list:
+1.0038167938931297
+
+decision_time_list:
+0.13805499648884603
+
+Path length list:
+11.209457003131245
+88.03890895843506
+
+timeout list:
+
+episodetime_list:
+232
+
+Episode real time list (seconds):
+88.04
+
+average_speed_list:
+1.0043103448275863
+
+decision_time_list:
+0.0013479470602258768
+
+Path length list:
+9.834597111636608
+191.87287592887878
+
+timeout list:
+
+episodetime_list:
+190
+
+Episode real time list (seconds):
+191.87
+
+average_speed_list:
+1.0052631578947369
+
+decision_time_list:
+0.22582809248384653
+
+Path length list:
+11.077954408550024
+63.60146927833557
+
+timeout list:
+
+episodetime_list:
+108
+
+Episode real time list (seconds):
+63.60
+
+average_speed_list:
+1.0092592592592593
+
+decision_time_list:
+0.0012837639079845285
+
+Path length list:
+4.848700684107225
+139.13801312446594
+
+timeout list:
+
+episodetime_list:
+242
+
+Episode real time list (seconds):
+139.14
+
+average_speed_list:
+1.0041322314049588
+
+decision_time_list:
+0.0015681011567165505
+
+Path length list:
+12.041837900466671
+116.68128299713135
+
+timeout list:
+
+episodetime_list:
+222
+
+Episode real time list (seconds):
+116.68
+
+average_speed_list:
+1.0045045045045045
+
+decision_time_list:
+0.0014807369768056338
+
+Path length list:
+10.783259940586504
+110.68507623672485
+
+timeout list:
+
+episodetime_list:
+240
+
+Episode real time list (seconds):
+110.69
+
+average_speed_list:
+1.0041666666666667
+
+decision_time_list:
+0.001444021883738363
+
+Path length list:
+9.725786585152793
+122.53950214385986
+
+timeout list:
+
+episodetime_list:
+248
+
+Episode real time list (seconds):
+122.54
+
+average_speed_list:
+1.0040322580645162
+
+decision_time_list:
+0.0014358936693292157
+
+Path length list:
+10.879678971425067
+112.62162399291992
+
+timeout list:
+
+episodetime_list:
+256
+
+Episode real time list (seconds):
+112.62
+
+average_speed_list:
+1.00390625
+
+decision_time_list:
+0.0014931849142385545
+
+Path length list:
+10.372079549238345
+131.7049560546875
+
+timeout list:
+
+episodetime_list:
+276
+
+Episode real time list (seconds):
+131.70
+
+average_speed_list:
+0.9855072463768116
+
+decision_time_list:
+0.0015071796412445585
+
+Path length list:
+11.256389638396062
+109.08339428901672
+
+timeout list:
+
+episodetime_list:
+122
+
+Episode real time list (seconds):
+109.08
+
+average_speed_list:
+1.0081967213114753
+
+decision_time_list:
+0.32278646591783133
+
+Path length list:
+5.330762968562877
+72.63251781463623
+
+timeout list:
+
+episodetime_list:
+132
+
+Episode real time list (seconds):
+72.63
+
+average_speed_list:
+0.9696969696969697
+
+decision_time_list:
+0.0015018390298461202
+
+Path length list:
+5.480479123596694
+120.10094356536865
+
+timeout list:
+
+episodetime_list:
+256
+
+Episode real time list (seconds):
+120.10
+
+average_speed_list:
+1.00390625
+
+decision_time_list:
+0.0013617340971450176
+
+Path length list:
+10.355064956860133
+186.89183568954468
+
+timeout list:
+
+episodetime_list:
+189
+
+Episode real time list (seconds):
+186.89
+
+average_speed_list:
+1.0052910052910053
+
+decision_time_list:
+0.473372291232827
+
+Path length list:
+9.834641489512586
+109.17076563835144
+
+timeout list:
+
+episodetime_list:
+218
+
+Episode real time list (seconds):
+109.17
+
+average_speed_list:
+1.0045871559633028
+
+decision_time_list:
+0.0017016589084993664
+
+Path length list:
+10.22039855113283
+109.15834307670593
+
+timeout list:
+
+episodetime_list:
+221
+
+Episode real time list (seconds):
+109.16
+
+average_speed_list:
+1.004524886877828
+
+decision_time_list:
+0.001403231190215181
+
+Path length list:
+9.93006343549796
+87.89214158058167
+
+timeout list:
+
+episodetime_list:
+130
+
+Episode real time list (seconds):
+87.89
+
+average_speed_list:
+0.9615384622262074
+
+decision_time_list:
+0.0015714591772008973
+
+Path length list:
+5.679774614915221
+200.7243001461029
+
+timeout list:
+
+episodetime_list:
+220
+
+Episode real time list (seconds):
+200.72
+
+average_speed_list:
+1.0045454545454546
+
+decision_time_list:
+0.42942614957666425
+
+Path length list:
+10.591205837320624
+103.09291005134583
+
+timeout list:
+
+episodetime_list:
+234
+
+Episode real time list (seconds):
+103.09
+
+average_speed_list:
+1.0042735042735043
+
+decision_time_list:
+0.0012667412189547864
+
+Path length list:
+9.753609251890547
+148.3490252494812
+
+timeout list:
+
+episodetime_list:
+204
+
+Episode real time list (seconds):
+148.35
+
+average_speed_list:
+1.0049019607843137
+
+decision_time_list:
+0.17662327424548885
+
+Path length list:
+10.386517085182694
+171.8069553375244
+
+timeout list:
+
+episodetime_list:
+200
+
+Episode real time list (seconds):
+171.81
+
+average_speed_list:
+1.005
+
+decision_time_list:
+0.23591991035500542
+
+Path length list:
+7.221563486341399
+641.2190153598785
+
+timeout list:
+29
+
+episodetime_list:
+999
+
+Episode real time list (seconds):
+641.22
+
+average_speed_list:
+1.001001001001001
+
+decision_time_list:
+0.09708702681375865
+
+Path length list:
+5.516015455693785
+158.76284074783325
+
+timeout list:
+
+episodetime_list:
+255
+
+Episode real time list (seconds):
+158.76
+
+average_speed_list:
+1.003921568627451
+
+decision_time_list:
+0.17835712798051628
+
+Path length list:
+10.705940183751183
+114.5501880645752
+
+timeout list:
+
+episodetime_list:
+237
+
+Episode real time list (seconds):
+114.55
+
+average_speed_list:
+1.0042194092827004
+
+decision_time_list:
+0.0016493550005647892
+
+Path length list:
+9.692726300676247
+114.21118402481079
+
+timeout list:
+
+episodetime_list:
+226
+
+Episode real time list (seconds):
+114.21
+
+average_speed_list:
+1.0044247787610618
+
+decision_time_list:
+0.0016744902385919008
+
+Path length list:
+9.781802351076214
+132.79230999946594
+
+timeout list:
+
+episodetime_list:
+237
+
+Episode real time list (seconds):
+132.79
+
+average_speed_list:
+1.0042194092827004
+
+decision_time_list:
+0.11816187013055587
+
+Path length list:
+10.381292396342726
+106.50510454177856
+
+timeout list:
+
+episodetime_list:
+224
+
+Episode real time list (seconds):
+106.51
+
+average_speed_list:
+1.0044642857142858
+
+decision_time_list:
+0.001427052160904298
+
+Path length list:
+9.825240686895091
+91.43429946899414
+
+timeout list:
+
+episodetime_list:
+163
+
+Episode real time list (seconds):
+91.43
+
+average_speed_list:
+1.0061349693251533
+
+decision_time_list:
+0.0014027938887904016
+
+Path length list:
+6.588245835107452
+222.2193615436554
+
+timeout list:
+
+episodetime_list:
+306
+
+Episode real time list (seconds):
+222.22
+
+average_speed_list:
+0.9477124183006536
+
+decision_time_list:
+0.3070535512126619
+
+Path length list:
+13.44795861416865
+194.4911811351776
+
+timeout list:
+
+episodetime_list:
+229
+
+Episode real time list (seconds):
+194.49
+
+average_speed_list:
+1.0043668122270741
+
+decision_time_list:
+0.21458347823534885
+
+Path length list:
+11.31617055914353
+194.74602627754211
+
+timeout list:
+
+episodetime_list:
+227
+
+Episode real time list (seconds):
+194.75
+
+average_speed_list:
+1.0044052863436124
+
+decision_time_list:
+0.17086268464324633
+
+Path length list:
+11.565280257061891
+597.0136749744415
+
+timeout list:
+39
+
+episodetime_list:
+999
+
+Episode real time list (seconds):
+597.01
+
+average_speed_list:
+0.992992992992993
+
+decision_time_list:
+0.1163897697246998
+
+Path length list:
+43.6421599340325
+553.0564608573914
+
+timeout list:
+40
+
+episodetime_list:
+999
+
+Episode real time list (seconds):
+553.06
+
+average_speed_list:
+1.001001001001001
+
+decision_time_list:
+0.057443926550436404
+
+Path length list:
+8.315488926374208
+163.16492772102356
+
+timeout list:
+
+episodetime_list:
+276
+
+Episode real time list (seconds):
+163.16
+
+average_speed_list:
+1.0036231884057971
+
+decision_time_list:
+0.00152988129021664
+
+Path length list:
+11.736612401003665
+218.4750461578369
+
+timeout list:
+
+episodetime_list:
+266
+
+Episode real time list (seconds):
+218.48
+
+average_speed_list:
+0.9924812030075187
+
+decision_time_list:
+0.21232451468425378
+
+Path length list:
+7.418612715526985
+47.2915358543396
+
+timeout list:
+
+episodetime_list:
+66
+
+Episode real time list (seconds):
+47.29
+
+average_speed_list:
+1.0151515151515151
+
+decision_time_list:
+0.0016530473792844339
+
+Path length list:
+2.5751487650961296
+438.2774934768677
+
+timeout list:
+
+episodetime_list:
+282
+
+Episode real time list (seconds):
+438.28
+
+average_speed_list:
+0.8439716312056738
+
+decision_time_list:
+0.8617808151982848
+
+Path length list:
+14.011217690630387
+162.5040237903595
+
+timeout list:
+
+episodetime_list:
+247
+
+Episode real time list (seconds):
+162.50
+
+average_speed_list:
+1.0040485829959513
+
+decision_time_list:
+0.0017103183285077763
+
+Path length list:
+9.71960597869707
+176.781574010849
+
+timeout list:
+
+episodetime_list:
+185
+
+Episode real time list (seconds):
+176.78
+
+average_speed_list:
+1.0054054054054054
+
+decision_time_list:
+0.1789483954974236
+
+Path length list:
+10.248871457011171
+208.55522441864014
+
+timeout list:
+
+episodetime_list:
+261
+
+Episode real time list (seconds):
+208.56
+
+average_speed_list:
+1.003831417624521
+
+decision_time_list:
+0.0017734668810826895
+
+Path length list:
+11.279447213372215
+266.1165325641632
+
+timeout list:
+
+episodetime_list:
+260
+
+Episode real time list (seconds):
+266.12
+
+average_speed_list:
+1.0038461538461538
+
+decision_time_list:
+0.2511653350995822
+
+Path length list:
+11.442281401490844
+124.7090539932251
+
+timeout list:
+
+episodetime_list:
+163
+
+Episode real time list (seconds):
+124.71
+
+average_speed_list:
+0.8877362969097184
+
+decision_time_list:
+0.0020374637229248105
+
+Path length list:
+5.9504682347157045
