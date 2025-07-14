@@ -560,9 +560,9 @@ class GazeboEnv:
     def change_goal(self):
         # Place a new goal and check if its location is not on one of the obstacles
         if self.upper < 8:
-            self.upper += 0.004*30
+            self.upper += 0.004
         if self.lower > -8:
-            self.lower -= 0.004*30
+            self.lower -= 0.004
 
         goal_ok = False
 
